@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import h5py
 import json
 import numpy as np
+import geopandas as gpd
+from shapely.geometry import shape, mapping, MultiPolygon, Polygon
 
 app = FastAPI()
 
@@ -29,6 +31,44 @@ app.add_middleware(
 @app.get("/geojson")
 def get_geojson():
     return JSONResponse(content=GEOJSON_DATA)
+
+# def safe_shape(feature):
+#     try:
+#         return shape(feature["geometry"])
+#     except Exception as e:
+#         print(f"Skipping feature {feature.get('id', '')}: {e}")
+#         return None
+
+# def is_valid_polygon(geom):
+#     # Check for empty, invalid, or non-numeric coordinates
+#     if geom is None or not isinstance(geom, Polygon):
+#         return False
+#     if geom.is_empty or not geom.is_valid:
+#         return False
+#     # Check for NaN or None in coordinates
+#     coords = np.array(geom.exterior.coords)
+#     if np.isnan(coords).any() or np.isinf(coords).any():
+#         return False
+#     return True
+
+# @app.get("/geojson/dissolved")
+# def get_dissolved_geojson():
+#     valid_features = []
+#     for feature in GEOJSON_DATA["features"]:
+#         geom = safe_shape(feature)
+#         if is_valid_polygon(geom):
+#             props = feature.get("properties", {})
+#             valid_features.append({"geometry": MultiPolygon([geom]), **props})
+#         else:
+#             print(f"Invalid or skipped geometry for feature id: {feature.get('id', '')}")
+
+#     if not valid_features:
+#         raise HTTPException(status_code=500, detail="No valid polygons found.")
+
+#     gdf = gpd.GeoDataFrame(valid_features, geometry="geometry")
+#     dissolved = gdf.dissolve(by="L1_label", as_index=False)
+#     dissolved_geojson = dissolved.__geo_interface__
+#     return JSONResponse(content=dissolved_geojson)
 
 @app.get("/nectar/max")
 def get_nectar_max():
