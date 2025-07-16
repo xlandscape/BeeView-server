@@ -6,18 +6,19 @@ import json
 import numpy as np
 import geopandas as gpd
 from shapely.geometry import shape, mapping, MultiPolygon, Polygon
+from shapely import wkt
+import os
+from sqlalchemy import text
+from database import get_session
+from models import Feature, Nectar
+from load_shapefile import load_shapefile_to_db
+from load_nectar import load_nectar_to_db
+import pickle
 
 app = FastAPI()
 
-# Load once at startup
-with open("server/data/Tarn_LULC_v04.geojson") as f:
-    GEOJSON_DATA = json.load(f)
-
-# Helper: Map feature id to index
-FEATURE_ID_TO_INDEX = {
-    str(feature["id"]): idx
-    for idx, feature in enumerate(GEOJSON_DATA["features"])
-}
+SHAPEFILE_PATH = os.getenv("SHAPEFILE_PATH", "data/Tarn_LULC_v04.shp")
+NECTAR_PATH = os.getenv("NECTAR_PATH", "data/arr.dat")
 
 # Allow all origins (for development)
 app.add_middleware(
@@ -28,59 +29,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+def startup_event():
+    session = next(get_session())
+    count = session.execute(text("SELECT COUNT(*) FROM features")).scalar()
+    if count == 0:
+        load_shapefile_to_db(SHAPEFILE_PATH, session)
+    nectar_count = session.execute(text("SELECT COUNT(*) FROM nectar")).scalar()
+    if nectar_count == 0:
+        load_nectar_to_db(NECTAR_PATH, session)
+
 @app.get("/geojson")
 def get_geojson():
-    return JSONResponse(content=GEOJSON_DATA)
-
-# def safe_shape(feature):
-#     try:
-#         return shape(feature["geometry"])
-#     except Exception as e:
-#         print(f"Skipping feature {feature.get('id', '')}: {e}")
-#         return None
-
-# def is_valid_polygon(geom):
-#     # Check for empty, invalid, or non-numeric coordinates
-#     if geom is None or not isinstance(geom, Polygon):
-#         return False
-#     if geom.is_empty or not geom.is_valid:
-#         return False
-#     # Check for NaN or None in coordinates
-#     coords = np.array(geom.exterior.coords)
-#     if np.isnan(coords).any() or np.isinf(coords).any():
-#         return False
-#     return True
-
-# @app.get("/geojson/dissolved")
-# def get_dissolved_geojson():
-#     valid_features = []
-#     for feature in GEOJSON_DATA["features"]:
-#         geom = safe_shape(feature)
-#         if is_valid_polygon(geom):
-#             props = feature.get("properties", {})
-#             valid_features.append({"geometry": MultiPolygon([geom]), **props})
-#         else:
-#             print(f"Invalid or skipped geometry for feature id: {feature.get('id', '')}")
-
-#     if not valid_features:
-#         raise HTTPException(status_code=500, detail="No valid polygons found.")
-
-#     gdf = gpd.GeoDataFrame(valid_features, geometry="geometry")
-#     dissolved = gdf.dissolve(by="L1_label", as_index=False)
-#     dissolved_geojson = dissolved.__geo_interface__
-#     return JSONResponse(content=dissolved_geojson)
+    session = next(get_session())
+    result = session.execute(text("SELECT id, name, lulc_label, geometry FROM features LIMIT 1000"))
+    features = []
+    for row in result:
+        # Convert WKT to GeoJSON geometry
+        geom = wkt.loads(row.geometry)
+        geojson_geom = mapping(geom)
+        features.append({
+            "id": row.id,
+            "properties": {"name": row.name, "L1_label": row.lulc_label},
+            "geometry": geojson_geom
+        })
+    return JSONResponse(content={"type": "FeatureCollection", "features": features})
 
 @app.get("/nectar/max")
 def get_nectar_max():
-    with h5py.File("server/data/arr.dat", "r") as f:
-        nectar = f["BeeForage/Nectar"][:]
-        max_vals = np.nan_to_num(nectar, nan=0).max(axis=1).tolist()
+    session = next(get_session())
+    result = session.execute(text("SELECT feature_id, timeseries FROM nectar"))
+    max_vals = []
+    for row in result:
+        timeseries = pickle.loads(row.timeseries)
+        max_val = np.nan_to_num(timeseries, nan=0).max()
+        max_vals.append({"feature_id": row.feature_id, "max_nectar": float(max_val)})
     return {"max_nectar": max_vals}
 
 @app.get("/nectar/stream")
 def stream_nectar():
     def gen():
-        with h5py.File("server/data/arr.dat", "r") as f:
+        with h5py.File(NECTAR_PATH, "r") as f:
             nectar = f["BeeForage/Nectar"]
             for row in nectar:
                 yield json.dumps({"max": float(row.max())}) + "\n"
@@ -88,9 +77,10 @@ def stream_nectar():
 
 @app.get("/nectar/timeseries/{feature_id}")
 def get_nectar_timeseries(feature_id: str):
-    idx = FEATURE_ID_TO_INDEX.get(str(feature_id))
-    if idx is None:
-        raise HTTPException(status_code=404, detail="Feature ID not found")
-    with h5py.File("server/data/arr.dat", "r") as f:
-        nectar = np.nan_to_num(f["BeeForage/Nectar"][idx, :], nan=0).tolist()
-    return {"feature_id": feature_id, "nectar_timeseries": nectar}
+    session = next(get_session())
+    result = session.execute(text(f"SELECT timeseries FROM nectar WHERE feature_id = {int(feature_id)}"))
+    nectar_obj = result.fetchone()
+    if nectar_obj is None:
+        raise HTTPException(status_code=404, detail="Feature ID not found or no nectar data")
+    timeseries = pickle.loads(nectar_obj[0])
+    return {"feature_id": feature_id, "nectar_timeseries": timeseries.tolist()}
