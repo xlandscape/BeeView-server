@@ -34,7 +34,7 @@ def startup_event():
     session = next(get_session())
     count = session.execute(text("SELECT COUNT(*) FROM features")).scalar()
     if count == 0:
-        load_shapefile_to_db(SHAPEFILE_PATH, session)
+        load_shapefile_to_db(SHAPEFILE_PATH, session, 100)
     nectar_count = session.execute(text("SELECT COUNT(*) FROM nectar")).scalar()
     if nectar_count == 0:
         load_nectar_to_db(NECTAR_PATH, session)
@@ -42,7 +42,8 @@ def startup_event():
 @app.get("/geojson")
 def get_geojson():
     session = next(get_session())
-    result = session.execute(text("SELECT id, name, lulc_label, geometry FROM features LIMIT 1000"))
+    # Select a random subset of 1000 rows
+    result = session.execute(text("SELECT id, name, lulc_label, geometry FROM features"))
     features = []
     for row in result:
         # Convert WKT to GeoJSON geometry

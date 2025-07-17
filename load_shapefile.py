@@ -2,11 +2,12 @@ import geopandas as gpd
 from models import Feature
 from shapely.geometry import MultiPolygon
 import logging
+import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def load_shapefile_to_db(shapefile_path: str, db_session):
+def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 1000):
     gdf = gpd.read_file(shapefile_path)
     logger.info(f"Shapefile CRS: {gdf.crs}")
     logger.info(f"First geometry (raw): {gdf.iloc[0].geometry}")
@@ -14,7 +15,9 @@ def load_shapefile_to_db(shapefile_path: str, db_session):
         logger.info("Reprojecting to EPSG:4326")
         gdf = gdf.to_crs(epsg=4326)
     logger.info(f"First geometry WKT (to be saved): {gdf.iloc[0].geometry.wkt}")
-    features = []
+    # Select a random subset
+    if len(gdf) > subset_size:
+        gdf = gdf.sample(n=subset_size, random_state=None)
     for _, row in gdf.iterrows():
         geom = row['geometry']
         if geom is None or geom.is_empty:
