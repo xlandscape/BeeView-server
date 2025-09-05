@@ -13,6 +13,7 @@ from database import get_session
 from models import Feature, Nectar
 from load_shapefile import load_shapefile_to_db
 from load_nectar import load_nectar_to_db
+from load_pollen import load_pollen_to_db
 import pickle
 
 app = FastAPI()
@@ -35,9 +36,12 @@ def startup_event():
     # Remove all existing entries for debugging
     session.execute(text("DELETE FROM features"))
     session.execute(text("DELETE FROM nectar"))
+    session.execute(text("DELETE FROM pollen"))
     session.commit()
     load_shapefile_to_db(SHAPEFILE_PATH, session, 100000)
     load_nectar_to_db(NECTAR_PATH, session)
+    load_pollen_to_db(NECTAR_PATH, session)
+    session.close()
 
 @app.get("/geojson")
 def get_geojson():
@@ -94,3 +98,40 @@ def get_nectar_timeseries(feature_id: str):
         return {"feature_id": feature_id, "nectar_timeseries": timeseries_clean.tolist()}
     finally:
         session.close()
+
+@app.get("/pollen/max")
+def get_pollen_max():
+    session = next(get_session())
+    try:
+        result = session.execute(text("SELECT feature_id, timeseries FROM pollen"))
+        max_vals = []
+        for row in result:
+            timeseries = pickle.loads(row.timeseries)
+            max_val = np.nan_to_num(timeseries, nan=0).max()
+            max_vals.append({"feature_id": row.feature_id, "max_pollen": float(max_val)})
+        return {"max_pollen": max_vals}
+    finally:
+        session.close()
+
+@app.get("/pollen/timeseries/{feature_id}")
+def get_pollen_timeseries(feature_id: str):
+    session = next(get_session())
+    try:
+        result = session.execute(text(f"SELECT timeseries FROM pollen WHERE feature_id = {int(feature_id)}"))
+        pollen_obj = result.fetchone()
+        if pollen_obj is None:
+            raise HTTPException(status_code=404, detail="Feature ID not found or no pollen data")
+        timeseries = pickle.loads(pollen_obj[0])
+        timeseries_clean = np.nan_to_num(timeseries, nan=0.0, posinf=0.0, neginf=0.0)
+        return {"feature_id": feature_id, "pollen_timeseries": timeseries_clean.tolist()}
+    finally:
+        session.close()
+
+@app.get("/pollen/stream")
+def stream_pollen():
+    def gen():
+        with h5py.File(NECTAR_PATH.replace('nectar', 'pollen'), "r") as f:
+            pollen = f["BeeForage/Pollen"]
+            for row in pollen:
+                yield json.dumps({"max": float(row.max())}) + "\n"
+    return StreamingResponse(gen(), media_type="application/json")
