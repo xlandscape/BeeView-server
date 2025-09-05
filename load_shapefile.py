@@ -1,11 +1,27 @@
 import geopandas as gpd
 from models import Feature
-from shapely.geometry import MultiPolygon
+from shapely.geometry import MultiPolygon, Polygon
 import logging
 import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def strip_z_from_geom(geom):
+    # Remove Z from all coordinates in Polygon or MultiPolygon
+    if geom is None or geom.is_empty:
+        return geom
+    if geom.geom_type == 'Polygon':
+        exterior = [(x, y) for x, y, *_ in geom.exterior.coords]
+        interiors = [
+            [(x, y) for x, y, *_ in ring.coords]
+            for ring in geom.interiors
+        ]
+        return Polygon(exterior, interiors)
+    elif geom.geom_type == 'MultiPolygon':
+        polygons = [strip_z_from_geom(poly) for poly in geom.geoms]
+        return MultiPolygon(polygons)
+    return geom
 
 def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 1000):
     gdf = gpd.read_file(shapefile_path)
@@ -17,6 +33,7 @@ def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 100
     logger.info(f"First geometry WKT (to be saved): {gdf.iloc[0].geometry.wkt}")
     # Select a random subset
     if len(gdf) > subset_size:
+        logger.info(f"Number of geometries is {len(gdf)}. Selecting random subset of size {subset_size}")
         gdf = gdf.sample(n=subset_size, random_state=None)
     for _, row in gdf.iterrows():
         geom = row['geometry']
@@ -25,10 +42,12 @@ def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 100
         # Ensure MultiPolygon
         if geom.geom_type == 'Polygon':
             geom = MultiPolygon([geom])
+        # Strip Z from all polygons
+        geom_2d = strip_z_from_geom(geom)
         feature = Feature(
             name=str(row.get('name', '')),  # Adjust property names as needed
             lulc_label=str(row.get('L1_label', '')),  # Adjust property names as needed
-            geometry=geom.wkt
+            geometry=geom_2d.wkt
         )
         db_session.add(feature)
     db_session.commit()
