@@ -36,36 +36,40 @@ def startup_event():
     session.execute(text("DELETE FROM features"))
     session.execute(text("DELETE FROM nectar"))
     session.commit()
-    load_shapefile_to_db(SHAPEFILE_PATH, session, 100)
+    load_shapefile_to_db(SHAPEFILE_PATH, session, 100000)
     load_nectar_to_db(NECTAR_PATH, session)
 
 @app.get("/geojson")
 def get_geojson():
     session = next(get_session())
-    # Select a random subset of 1000 rows
-    result = session.execute(text("SELECT id, name, lulc_label, geometry FROM features"))
-    features = []
-    for row in result:
-        # Convert WKT to GeoJSON geometry
-        geom = wkt.loads(row.geometry)
-        geojson_geom = mapping(geom)
-        features.append({
-            "id": row.id,
-            "properties": {"name": row.name, "L1_label": row.lulc_label},
-            "geometry": geojson_geom
-        })
-    return JSONResponse(content={"type": "FeatureCollection", "features": features})
+    try:
+        result = session.execute(text("SELECT id, name, lulc_label, geometry FROM features"))
+        features = []
+        for row in result:
+            geom = wkt.loads(row.geometry)
+            geojson_geom = mapping(geom)
+            features.append({
+                "id": row.id,
+                "properties": {"name": row.name, "L1_label": row.lulc_label},
+                "geometry": geojson_geom
+            })
+        return JSONResponse(content={"type": "FeatureCollection", "features": features})
+    finally:
+        session.close()
 
 @app.get("/nectar/max")
 def get_nectar_max():
     session = next(get_session())
-    result = session.execute(text("SELECT feature_id, timeseries FROM nectar"))
-    max_vals = []
-    for row in result:
-        timeseries = pickle.loads(row.timeseries)
-        max_val = np.nan_to_num(timeseries, nan=0).max()
-        max_vals.append({"feature_id": row.feature_id, "max_nectar": float(max_val)})
-    return {"max_nectar": max_vals}
+    try:
+        result = session.execute(text("SELECT feature_id, timeseries FROM nectar"))
+        max_vals = []
+        for row in result:
+            timeseries = pickle.loads(row.timeseries)
+            max_val = np.nan_to_num(timeseries, nan=0).max()
+            max_vals.append({"feature_id": row.feature_id, "max_nectar": float(max_val)})
+        return {"max_nectar": max_vals}
+    finally:
+        session.close()
 
 @app.get("/nectar/stream")
 def stream_nectar():
@@ -79,9 +83,14 @@ def stream_nectar():
 @app.get("/nectar/timeseries/{feature_id}")
 def get_nectar_timeseries(feature_id: str):
     session = next(get_session())
-    result = session.execute(text(f"SELECT timeseries FROM nectar WHERE feature_id = {int(feature_id)}"))
-    nectar_obj = result.fetchone()
-    if nectar_obj is None:
-        raise HTTPException(status_code=404, detail="Feature ID not found or no nectar data")
-    timeseries = pickle.loads(nectar_obj[0])
-    return {"feature_id": feature_id, "nectar_timeseries": timeseries.tolist()}
+    try:
+        result = session.execute(text(f"SELECT timeseries FROM nectar WHERE feature_id = {int(feature_id)}"))
+        nectar_obj = result.fetchone()
+        if nectar_obj is None:
+            raise HTTPException(status_code=404, detail="Feature ID not found or no nectar data")
+        timeseries = pickle.loads(nectar_obj[0])
+        # Replace NaN and infinite values with 0.0
+        timeseries_clean = np.nan_to_num(timeseries, nan=0.0, posinf=0.0, neginf=0.0)
+        return {"feature_id": feature_id, "nectar_timeseries": timeseries_clean.tolist()}
+    finally:
+        session.close()
