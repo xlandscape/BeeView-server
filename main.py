@@ -51,6 +51,7 @@ def get_geojson():
         features = []
         for row in result:
             geom = wkt.loads(row.geometry)
+            geom = geom.simplify(0.1, preserve_topology=True)
             geojson_geom = mapping(geom)
             features.append({
                 "id": row.id,
@@ -58,6 +59,87 @@ def get_geojson():
                 "geometry": geojson_geom
             })
         return JSONResponse(content={"type": "FeatureCollection", "features": features})
+    finally:
+        session.close()
+
+@app.get("/geojson/viewport")
+def get_geojson_viewport(
+    min_lng: float,
+    min_lat: float, 
+    max_lng: float,
+    max_lat: float,
+    zoom: float = 10.0,
+    simplify_tolerance: float = None,
+    disable_simplify: bool = False
+):
+    """
+    Get GeoJSON features within the specified viewport bounding box.
+    
+    Args:
+        min_lng: Minimum longitude (west bound)
+        min_lat: Minimum latitude (south bound)
+        max_lng: Maximum longitude (east bound)
+        max_lat: Maximum latitude (north bound)
+        zoom: Current zoom level for geometry simplification
+        simplify_tolerance: Optional geometry simplification tolerance
+    """
+    session = next(get_session())
+    try:
+        # Calculate simplification tolerance based on zoom level if not provided
+        if disable_simplify:
+            simplify_tolerance = 0  # Disable simplification completely
+        elif simplify_tolerance is None:
+            # Disable simplification for testing
+            simplify_tolerance = 0.01  # Set to 0 to disable
+            # Original formula (comment out for testing):
+            # simplify_tolerance = max(0.0001, 0.01 / (zoom + 1))
+        
+        # Create bounding box polygon for intersection query
+        bbox_wkt = f"POLYGON(({min_lng} {min_lat}, {max_lng} {min_lat}, {max_lng} {max_lat}, {min_lng} {max_lat}, {min_lng} {min_lat}))"
+        
+        # DuckDB may not have full spatial functions, so we'll do bounding box filtering in Python
+        # First get all features (we'll optimize this with spatial indexing later)
+        query = text("SELECT id, name, lulc_label, geometry FROM features")
+        result = session.execute(query)
+        
+        features = []
+        bbox_polygon = Polygon([
+            (min_lng, min_lat), (max_lng, min_lat), 
+            (max_lng, max_lat), (min_lng, max_lat), 
+            (min_lng, min_lat)
+        ])
+        
+        for row in result:
+            try:
+                geom = wkt.loads(row.geometry)
+                
+                # Check if geometry intersects with bounding box
+                if geom.intersects(bbox_polygon):
+                    # Simplify geometry based on zoom level
+                    if simplify_tolerance > 0:
+                        geom = geom.simplify(simplify_tolerance, preserve_topology=True)
+                    
+                    geojson_geom = mapping(geom)
+                    features.append({
+                        "id": row.id,
+                        "properties": {"name": row.name, "L1_label": row.lulc_label},
+                        "geometry": geojson_geom
+                    })
+            except Exception as e:
+                # Skip invalid geometries
+                print(f"Error processing geometry for feature {row.id}: {e}")
+                continue
+        
+        return JSONResponse(content={
+            "type": "FeatureCollection", 
+            "features": features,
+            "viewport": {
+                "bounds": [min_lng, min_lat, max_lng, max_lat],
+                "zoom": zoom,
+                "simplify_tolerance": simplify_tolerance,
+                "feature_count": len(features)
+            }
+        })
     finally:
         session.close()
 
@@ -71,6 +153,53 @@ def get_nectar_max():
             timeseries = pickle.loads(row.timeseries)
             max_val = np.nan_to_num(timeseries, nan=0).max()
             max_vals.append({"feature_id": row.feature_id, "max_nectar": float(max_val)})
+        return {"max_nectar": max_vals}
+    finally:
+        session.close()
+
+@app.get("/nectar/max/viewport")
+def get_nectar_max_viewport(
+    min_lng: float,
+    min_lat: float, 
+    max_lng: float,
+    max_lat: float
+):
+    """Get nectar max values for features within the viewport."""
+    session = next(get_session())
+    try:
+        # Get features in viewport first
+        query = text("SELECT id, geometry FROM features")
+        result = session.execute(query)
+        
+        bbox_polygon = Polygon([
+            (min_lng, min_lat), (max_lng, min_lat), 
+            (max_lng, max_lat), (min_lng, max_lat), 
+            (min_lng, min_lat)
+        ])
+        
+        viewport_feature_ids = []
+        for row in result:
+            try:
+                geom = wkt.loads(row.geometry)
+                if geom.intersects(bbox_polygon):
+                    viewport_feature_ids.append(row.id)
+            except Exception:
+                continue
+        
+        if not viewport_feature_ids:
+            return {"max_nectar": []}
+        
+        # Get nectar data for viewport features
+        feature_ids_str = ','.join(map(str, viewport_feature_ids))
+        nectar_query = text(f"SELECT feature_id, timeseries FROM nectar WHERE feature_id IN ({feature_ids_str})")
+        nectar_result = session.execute(nectar_query)
+        
+        max_vals = []
+        for row in nectar_result:
+            timeseries = pickle.loads(row.timeseries)
+            max_val = np.nan_to_num(timeseries, nan=0).max()
+            max_vals.append({"feature_id": row.feature_id, "max_nectar": float(max_val)})
+        
         return {"max_nectar": max_vals}
     finally:
         session.close()
@@ -109,6 +238,53 @@ def get_pollen_max():
             timeseries = pickle.loads(row.timeseries)
             max_val = np.nan_to_num(timeseries, nan=0).max()
             max_vals.append({"feature_id": row.feature_id, "max_pollen": float(max_val)})
+        return {"max_pollen": max_vals}
+    finally:
+        session.close()
+
+@app.get("/pollen/max/viewport")
+def get_pollen_max_viewport(
+    min_lng: float,
+    min_lat: float, 
+    max_lng: float,
+    max_lat: float
+):
+    """Get pollen max values for features within the viewport."""
+    session = next(get_session())
+    try:
+        # Get features in viewport first
+        query = text("SELECT id, geometry FROM features")
+        result = session.execute(query)
+        
+        bbox_polygon = Polygon([
+            (min_lng, min_lat), (max_lng, min_lat), 
+            (max_lng, max_lat), (min_lng, max_lat), 
+            (min_lng, min_lat)
+        ])
+        
+        viewport_feature_ids = []
+        for row in result:
+            try:
+                geom = wkt.loads(row.geometry)
+                if geom.intersects(bbox_polygon):
+                    viewport_feature_ids.append(row.id)
+            except Exception:
+                continue
+        
+        if not viewport_feature_ids:
+            return {"max_pollen": []}
+        
+        # Get pollen data for viewport features
+        feature_ids_str = ','.join(map(str, viewport_feature_ids))
+        pollen_query = text(f"SELECT feature_id, timeseries FROM pollen WHERE feature_id IN ({feature_ids_str})")
+        pollen_result = session.execute(pollen_query)
+        
+        max_vals = []
+        for row in pollen_result:
+            timeseries = pickle.loads(row.timeseries)
+            max_val = np.nan_to_num(timeseries, nan=0).max()
+            max_vals.append({"feature_id": row.feature_id, "max_pollen": float(max_val)})
+        
         return {"max_pollen": max_vals}
     finally:
         session.close()
