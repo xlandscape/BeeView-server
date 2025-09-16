@@ -35,14 +35,14 @@ def start_server():
     """Start the FastAPI server"""
     try:
         print("Starting BeeForage server...")
-        print("   Server will be available at: http://localhost:8000")
-        print("   API documentation at: http://localhost:8000/docs")
+        print("   Server will be available at: http://localhost:32000")
+        print("   API documentation at: http://localhost:32000/docs")
         print("   Press Ctrl+C to stop the server")
         print()
         
         subprocess.run([
             sys.executable, "-m", "uvicorn", 
-            "main:app", "--reload", "--port", "8000"
+            "main:app", "--reload", "--port", "32000"
         ], check=True)
     except KeyboardInterrupt:
         print("\nServer stopped by user")
