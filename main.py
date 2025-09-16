@@ -15,6 +15,7 @@ from load_shapefile import load_shapefile_to_db
 from load_nectar import load_nectar_to_db
 from load_pollen import load_pollen_to_db
 from load_bee_population import load_bee_population_to_db
+from xml_parser import get_beehive_location
 import pickle
 
 app = FastAPI()
@@ -63,6 +64,18 @@ def get_all_feature_ids():
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+
+@app.get("/api/beehive-location")
+def api_get_beehive_location():
+    """Get the beehive location from template.xrun"""
+    try:
+        location = get_beehive_location()
+        if location:
+            return location
+        else:
+            raise HTTPException(status_code=404, detail="Beehive location not found in template.xrun")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading beehive location: {str(e)}")
 
 @app.get("/geojson")
 def get_geojson():
