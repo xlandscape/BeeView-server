@@ -10,7 +10,6 @@ class Feature(Base):
     geometry: Mapped[str] = mapped_column(String)
     nectar = relationship("Nectar", back_populates="feature", cascade="all, delete-orphan")
     pollen = relationship("Pollen", back_populates="feature", cascade="all, delete-orphan")
-    bee_population = relationship("BeePopulation", back_populates="feature", cascade="all, delete-orphan")
 
 class Nectar(Base):
     __tablename__ = "nectar"
@@ -29,6 +28,5 @@ class Pollen(Base):
 class BeePopulation(Base):
     __tablename__ = "bee_population"
     id: Mapped[int] = mapped_column(Integer, Sequence('bee_population_id_seq'), primary_key=True)
-    feature_id: Mapped[int] = mapped_column(Integer, ForeignKey("features.id"))
-    timeseries: Mapped[bytes] = mapped_column(LargeBinary)  # Will store pickled dict with all bee metrics
-    feature = relationship("Feature", back_populates="bee_population")
+    metric_name: Mapped[str] = mapped_column(String(50))  # e.g., "totalEggs", "totalForagers"
+    timeseries: Mapped[bytes] = mapped_column(LargeBinary)  # Pickled numpy array for 365 days

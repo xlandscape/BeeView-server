@@ -15,14 +15,25 @@ from load_shapefile import load_shapefile_to_db
 from load_nectar import load_nectar_to_db
 from load_pollen import load_pollen_to_db
 from load_bee_population import load_bee_population_to_db
-from xml_parser import get_beehive_location
+from xml_parser import get_beehive_location, get_beehive_buffer_bounds
 import pickle
+import logging
+
+# Configure logging once at application startup
+logging.basicConfig(level=logging.WARNING)
+
+# Set specific loggers
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
+logging.getLogger('load_shapefile').setLevel(logging.INFO)  # If you want load_shapefile logs
 
 app = FastAPI()
 
 SHAPEFILE_PATH = os.getenv("SHAPEFILE_PATH", "data/Tarn_LULC_v04.shp")
 NECTAR_PATH = os.getenv("NECTAR_PATH", "data/arr.dat")
 BEE_POPULATION_PATH = os.getenv("BEE_POPULATION_PATH", "data/output.csv")
+# Configurable radius around beehive location (in kilometers)
+BEEHIVE_RADIUS_KM = float(os.getenv("BEEHIVE_RADIUS_KM", "5.0"))
 
 # Allow all origins (for development)
 app.add_middleware(
@@ -41,7 +52,8 @@ def startup_event():
     Base.metadata.create_all(engine)
     
     print("DATA LOADING: Loading fresh data...")
-    load_shapefile_to_db(SHAPEFILE_PATH, session, 10000)
+    print(f"Using beehive radius filter: {BEEHIVE_RADIUS_KM}km")
+    load_shapefile_to_db(SHAPEFILE_PATH, session, 30000, BEEHIVE_RADIUS_KM)
     load_nectar_to_db(NECTAR_PATH, session)
     load_pollen_to_db(NECTAR_PATH, session)
     load_bee_population_to_db(BEE_POPULATION_PATH, session)
@@ -76,6 +88,26 @@ def api_get_beehive_location():
             raise HTTPException(status_code=404, detail="Beehive location not found in template.xrun")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading beehive location: {str(e)}")
+
+@app.get("/api/beehive-radius")
+def get_beehive_radius():
+    """Get the current beehive radius configuration"""
+    return {
+        "radius_km": BEEHIVE_RADIUS_KM,
+        "description": "Current radius filter around beehive location"
+    }
+
+@app.get("/api/beehive-buffer")
+def get_beehive_buffer():
+    """Get the beehive buffer area bounds"""
+    try:
+        bounds = get_beehive_buffer_bounds(BEEHIVE_RADIUS_KM)
+        if bounds:
+            return bounds
+        else:
+            raise HTTPException(status_code=404, detail="Could not calculate beehive buffer")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error calculating beehive buffer: {str(e)}")
 
 @app.get("/geojson")
 def get_geojson():
@@ -713,36 +745,30 @@ def get_timeseries_averages(feature_ids: str = None, include_nectar: bool = True
         session.close()
 
 # Bee Population endpoints
-@app.get("/api/bee-population/time-point/{date}")
-def get_bee_population_for_date(date: int):
-    """Get bee population data for a specific time point"""
+@app.get("/api/bee-population/time-point/{day}")
+def get_bee_population_for_day(day: int):
+    """Get bee population data for a specific day"""
+    if day < 1 or day > 365:
+        raise HTTPException(status_code=400, detail="Day must be between 1 and 365")
+    
     session = next(get_session())
     try:
-        # Get all bee population data
-        bee_populations = session.query(BeePopulation).all()
+        records = session.query(BeePopulation).all()
         
-        if not bee_populations:
+        if not records:
             raise HTTPException(status_code=404, detail="No bee population data found")
         
-        # Take the first entry (assuming all features have the same bee population data)
-        bee_pop = bee_populations[0]
-        timeseries_data = pickle.loads(bee_pop.timeseries)
+        result = {"day": day}
+        for record in records:
+            timeseries = pickle.loads(record.timeseries)
+            time_index = day - 1  # Convert to 0-based index
+            if time_index < len(timeseries):
+                result[record.metric_name] = float(timeseries[time_index])
+            else:
+                result[record.metric_name] = 0.0
         
-        # Check if the requested date exists
-        days = timeseries_data.get('days', [])
-        if date not in days:
-            raise HTTPException(status_code=404, detail=f"No bee population data for day {date}")
+        return result
         
-        # Find the index for this date
-        day_index = days.index(date)
-        
-        # Extract values for this day
-        result = {}
-        for metric in timeseries_data:
-            if metric != 'days':  # Skip the days array
-                result[metric] = timeseries_data[metric][day_index]
-        
-        return {"day": date, "data": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -750,44 +776,42 @@ def get_bee_population_for_date(date: int):
 
 @app.get("/api/bee-population/timeseries")
 def get_bee_population_timeseries():
-    """Get complete bee population time series data"""
+    """Get complete time series for all bee population metrics"""
     session = next(get_session())
     try:
-        # Get all bee population data
-        bee_populations = session.query(BeePopulation).all()
+        # Get all metrics
+        records = session.query(BeePopulation).all()
         
-        if not bee_populations:
-            raise HTTPException(status_code=404, detail="No bee population data found")
+        data = {}
+        for record in records:
+            timeseries = pickle.loads(record.timeseries)
+            data[record.metric_name] = timeseries.tolist()
         
-        # Take the first entry (assuming all features have the same bee population data)
-        bee_pop = bee_populations[0]
-        timeseries_data = pickle.loads(bee_pop.timeseries)
+        # Create day-by-day structure
+        if data:
+            num_days = len(next(iter(data.values())))
+            result = []
+            for day in range(num_days):
+                day_data = {"day": day + 1}  # Days 1-365
+                for metric, values in data.items():
+                    day_data[metric] = values[day] if day < len(values) else 0.0
+                result.append(day_data)
+            
+            return {"timeseries": result}
         
-        return timeseries_data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"timeseries": []}
+        
     finally:
         session.close()
 
 @app.get("/api/bee-population/metrics")
 def get_bee_population_metrics():
-    """Get available bee population metrics"""
+    """Get list of available bee population metrics"""
     session = next(get_session())
     try:
-        bee_populations = session.query(BeePopulation).all()
-        
-        if not bee_populations:
-            return {"metrics": []}
-        
-        bee_pop = bee_populations[0]
-        timeseries_data = pickle.loads(bee_pop.timeseries)
-        
-        # Return all metrics except 'days'
-        metrics = [metric for metric in timeseries_data.keys() if metric != 'days']
-        
+        result = session.query(BeePopulation.metric_name).distinct().all()
+        metrics = [row.metric_name for row in result]
         return {"metrics": metrics}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
 
