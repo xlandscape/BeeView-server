@@ -1,0 +1,170 @@
+﻿L1_code,L1_label,L2_code,L2_label,L3_code,L3_label,Data Source,Source Code,last change,Vegetation,Vegetation-to-LULC certainty (school quotes)
+1,Arable,11,Cereals,1101,Another cereal of a different kind,RPG,CAG,9/10/2021,cereals general,
+1,Arable,11,Cereals,1102,Another spring cereal of the genus Hordeum,RPG,CPH,9/10/2021,cereals general,
+1,Arable,11,Cereals,1103,Buckwheat,RPG,SRS,9/10/2021,Fagopyrum esculentum,
+1,Arable,11,Cereals,1104,Corn,RPG,MIS,9/10/2021,maize general,
+1,Arable,11,Cereals,1105,Feed made up of cereals and/or protein (in proportion < 50%) and/or forage legumes (in proportion < 50%),RPG,CPL,9/10/2021,cereals general,
+1,Arable,11,Cereals,1106,Mixed cereals,RPG,MCR,9/10/2021,cereals general,
+1,Arable,11,Cereals,1107,Other Sorghum-type cereal,RPG,CGO,9/10/2021,sorghum general,
+1,Arable,11,Cereals,1108,Silage corn,RPG,MIE,9/10/2021,maize general,
+1,Arable,11,Cereals,1109,Sorghum,RPG,SOG,9/10/2021,sorghum general,
+1,Arable,11,Cereals,1110,Spelt,RPG,EPE,9/10/2021,cereals general,
+1,Arable,11,Cereals,1111,Spring barley,RPG,ORP,9/10/2021,cereals general,
+1,Arable,11,Cereals,1112,Spring durum wheat,RPG,BDP,9/10/2021,cereals general,
+1,Arable,11,Cereals,1113,Spring oats,RPG,AVP,9/10/2021,cereals general,
+1,Arable,11,Cereals,1114,Spring soft wheat,RPG,BTP,9/10/2021,cereals general,
+1,Arable,11,Cereals,1115,Spring triticale,RPG,TTP,9/10/2021,cereals general,
+1,Arable,11,Cereals,1116,Sweet corn,RPG,MID,9/10/2021,maize general,
+1,Arable,11,Cereals,1117,Winter barley,RPG,ORH,9/10/2021,cereals general,
+1,Arable,11,Cereals,1118,Winter durum wheat,RPG,BDH,9/10/2021,cereals general,
+1,Arable,11,Cereals,1119,Winter oats,RPG,AVH,9/10/2021,cereals general,
+1,Arable,11,Cereals,1120,Winter rye,RPG,SGH,9/10/2021,cereals general,
+1,Arable,11,Cereals,1121,Winter soft wheat,RPG,BTH,9/10/2021,cereals general,
+1,Arable,11,Cereals,1122,Winter triticale,RPG,TTH,9/10/2021,cereals general,
+1,Arable,12,Oilseeds,1201,Soy,RPG,SOJ,9/10/2021,soy general,
+1,Arable,12,Oilseeds,1202,Spring non-textile linen,RPG,LIP,9/10/2021,linen general,
+1,Arable,12,Oilseeds,1203,Spring rapeseed,RPG,CZP,9/10/2021,rape spring,
+1,Arable,12,Oilseeds,1204,Sunflower,RPG,TRN,9/10/2021,sunflower general,
+1,Arable,12,Oilseeds,1205,Winter non-textile linen,RPG,LIH,9/10/2021,linen general,
+1,Arable,12,Oilseeds,1206,Winter rapeseed,RPG,CZH,9/10/2021,rape winter,
+1,Arable,13,Protein crops,1301,Beans,RPG,FEV,9/10/2021,beans general,
+1,Arable,13,Protein crops,1302,Mixture of predominantly protein crops (peas and / or lupine and / or faba bean) sown before 05/31 and cereals,RPG,MPC,9/10/2021,leguminose mixture general,
+1,Arable,13,Protein crops,1303,Mixture of protein crops (peas and / or lupine and / or faba bean),RPG,MPP,9/10/2021,leguminose mixture general,
+1,Arable,13,Protein crops,1304,Spring peas sown before May 31,RPG,PPR,9/10/2021,peas spring general,
+1,Arable,13,Protein crops,1305,Sweet spring lupin sown before may 31st,RPG,LDP,9/10/2021,lupin spring general,
+1,Arable,13,Protein crops,1306,Winter peas,RPG,PHI,9/10/2021,peas general,
+1,Arable,14,Pulses,1401,Chickpeas,RPG,PCH,9/10/2021,peas general,
+1,Arable,14,Pulses,1402,Cultivated lentils (non-forage),RPG,LEC,9/10/2021,lentis general,
+1,Arable,15,Vegetables and flowers,1501,Artichoke,RPG,ART,9/10/2021,artichoke general,
+1,Arable,15,Vegetables and flowers,1502,Arugula,RPG,ROQ,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1503,Bean / Flageolet,RPG,HAR,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1504,Butternut squash / Butternut,RPG,CMB,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1505,Cabbage,RPG,CHU,9/10/2021,cabbage_general,2
+1,Arable,15,Vegetables and flowers,1506,Carrot,RPG,CAR,9/15/2021,carrot general,
+1,Arable,15,Vegetables and flowers,1507,Chicory / Endive / Escarole,RPG,CES,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1508,Courgette/pumpkin,RPG,CCT,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1509,Cucumber/pickle,RPG,CCN,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1510,Daisy,RPG,MRG,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1511,Daisy,RPG,PAQ,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1512,Eggplant,RPG,AUB,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1513,Garlic,RPG,AIL,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1514,Green peas,RPG,PPO,9/10/2021,peas general,4
+1,Arable,15,Vegetables and flowers,1515,Lavender,RPG,LAV,9/10/2021,lavender general,2
+1,Arable,15,Vegetables and flowers,1516,Leek,RPG,POR,9/10/2021,leek_general,2
+1,Arable,15,Vegetables and flowers,1517,Lettuce / Batavia / Oak leaf,RPG,LBF,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1518,Melon,RPG,MLO,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1519,Onion/shallot,RPG,OIG,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1520,Other annual vegetable or fruit,RPG,FLA,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1521,Other vegetable or perennial fruit,RPG,FLP,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1522,Pepper,RPG,PVP,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1523,Potato for consumption,RPG,PTC,9/10/2021,potato_general,2
+1,Arable,15,Vegetables and flowers,1524,Pumpkin,RPG,POT,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1525,Radish,RPG,RDI,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1526,Spinach,RPG,EPI,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1527,Strawberry,RPG,FRA,9/10/2021,strawberry_general,2
+1,Arable,15,Vegetables and flowers,1528,Tomato,RPG,TOM,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1529,Turnip,RPG,NVT,9/10/2021,,
+1,Arable,15,Vegetables and flowers,1530,Watermelon,RPG,PAS,9/10/2021,,
+1,Arable,16,Industrial crops,1601,"Another annual fragrance, aromatic and medicinal plant",RPG,PPA,9/10/2021,,
+1,Arable,16,Industrial crops,1602,"Another perennial perfume, aromatic and medicinal plant",RPG,PPP,9/10/2021,,
+1,Arable,16,Industrial crops,1603,Basil,RPG,BAS,9/10/2021,,
+1,Arable,16,Industrial crops,1604,Black Psyllium from Provence,RPG,PSN,9/10/2021,,
+1,Arable,16,Industrial crops,1605,Chives,RPG,CIB,9/10/2021,,
+1,Arable,16,Industrial crops,1606,Coriander,RPG,CRD,9/10/2021,,
+1,Arable,16,Industrial crops,1607,Fennel,RPG,FNO,9/10/2021,,
+1,Arable,16,Industrial crops,1608,Fenugreek,RPG,FNU,9/10/2021,fenugreek_general,2
+1,Arable,16,Industrial crops,1609,Non-forage beet / Swiss chard,RPG,BTN,9/10/2021,,
+1,Arable,16,Industrial crops,1610,Parsley,RPG,PSL,9/10/2021,,
+1,Arable,16,Industrial crops,1611,Thyme,RPG,THY,3/17/2022,thyme_general,
+1,Arable,16,Industrial crops,1612,Tobacco,RPG,TAB,9/10/2021,,
+1,Arable,17,Miscellaneous or mixed,1701,Brome grass 5 years or less,RPG,BRO,9/10/2021,,
+1,Arable,17,Miscellaneous or mixed,1702,Complex cultivation patterns,CORINE,242,9/10/2021,arable-natural mix,3
+1,Arable,17,Miscellaneous or mixed,1703,Cultures carried out in inter-rows: 2 cultures each representing more than 25%,RPG,CID,9/10/2021,grassland_pasture_intense,4
+1,Arable,17,Miscellaneous or mixed,1704,Cultures carried out in inter-rows: 3 cultures each representing more than 25%,RPG,CIT,9/10/2021,grassland_pasture_intense,4
+1,Arable,17,Miscellaneous or mixed,1705,Fallow 5 years or less,RPG,J5M,9/10/2021,fallow general,3
+1,Arable,17,Miscellaneous or mixed,1706,Fallow 6 years or more declared as Area of ​​ecological interest,RPG,J6S,9/10/2021,fallow general,3
+1,Arable,17,Miscellaneous or mixed,1707,Fallow 6 years or older,RPG,J6P,9/10/2021,fallow general,3
+1,Arable,17,Miscellaneous or mixed,1708,Field edge,RPG,BOR,9/10/2021,grassland low density general,3
+1,Arable,17,Miscellaneous or mixed,1709,Greenhouse culture without soil,RPG,CSS,9/10/2021,no vegetation,2
+1,Arable,17,Miscellaneous or mixed,1710,Hemp,RPG,CHV,9/10/2021,,
+1,Arable,17,Miscellaneous or mixed,1711,"Land principally occupied by agriculture, with significant areas of natural vegetation",CORINE,243,9/10/2021,arable-natural mix,3
+1,Arable,17,Miscellaneous or mixed,1712,Miscanthus,RPG,MCT,9/10/2021,,
+1,Arable,17,Miscellaneous or mixed,1713,Non-irrigated arable land,CORINE,211,9/10/2021,no forage vegetation,3
+1,Arable,17,Miscellaneous or mixed,1714,Permissible strip along a forest with production,RPG,BFP,9/10/2021,,
+1,Arable,17,Miscellaneous or mixed,1715,Temporarily unused agricultural area,RPG,SNE,9/10/2021,fallow temporary general,3
+1,Arable,17,Miscellaneous or mixed,1716,Truffle (oak grove of mycorrhizal plants),RPG,TRU,9/10/2021,wood_general,4
+2,Orchards/vineyards/berries,21,Fruit and berries,2101,Bigarreau cherry for processing,RPG,CBT,9/10/2021,,
+2,Orchards/vineyards/berries,21,Fruit and berries,2102,Fruit and berry plantation,CORINE,21,9/10/2021,fruit and berry generalised,
+2,Orchards/vineyards/berries,21,Fruit and berries,2103,Nursery,RPG,PEP,9/10/2021,nursery generalised,
+2,Orchards/vineyards/berries,21,Fruit and berries,2104,Orchard,RPG,VRG,9/10/2021,fruit and berry generalised,
+2,Orchards/vineyards/berries,21,Fruit and berries,2105,Plum d'Ente for processing,RPG,PRU,9/10/2021,,
+2,Orchards/vineyards/berries,21,Fruit and berries,2106,Small red fruit,RPG,PFR,9/10/2021,,
+2,Orchards/vineyards/berries,21,Fruit and berries,2107,Williams pear for processing,RPG,PWT,9/10/2021,pears early generalised,
+2,Orchards/vineyards/berries,22,Nuts,2201,Chestnut,RPG,CTG,9/10/2021,chestnut general,4
+2,Orchards/vineyards/berries,22,Nuts,2202,Hazelnut,RPG,NOS,9/10/2021,haselnut_general,4
+2,Orchards/vineyards/berries,22,Nuts,2301,Nuts,RPG,NOX,9/10/2021,haselnut_general,4
+2,Orchards/vineyards/berries,23,Vineyards,2302,Vine: table grapes,RPG,VRT,9/10/2021,grassland low density general,
+2,Orchards/vineyards/berries,23,Vineyards,2303,Vine: vat grapes,RPG,VRC,9/10/2021,grassland low density general,
+2,Orchards/vineyards/berries,23,Vineyards,2304,Vine: wine grapes not in production,RPG,VRN,9/10/2021,grassland low density general,
+2,Orchards/vineyards/berries,23,Vineyards,2305,Vineyard restructuring,RPG,RVI,9/10/2021,grassland low density general,
+2,Orchards/vineyards/berries,23,Vineyards,2306,Vineyards,CORINE,221,9/10/2021,grassland low density general,
+2,Orchards/vineyards/berries,24,Olives,2401,Olive orchard,RPG,OLI,9/10/2021,pollen_only,3
+3,Grassland/pasture/meadow/forage,31,Flowering forage/fodder,3101,Dactyl 5 years or less (orchard grass?),RPG,DTY,9/10/2021,,
+3,Grassland/pasture/meadow/forage,31,Flowering forage/fodder,3102,Dehydrated alfalfa,RPG,LUD,9/10/2021,alfalfa general,
+3,Grassland/pasture/meadow/forage,31,Flowering forage/fodder,3103,Faba bean sown before May 31st,RPG,FVL,9/10/2021,beans_general,4
+3,Grassland/pasture/meadow/forage,31,Flowering forage/fodder,3104,Mixture of legumes predominantly at seed and forage grasses 5 years or less,RPG,MLG,9/10/2021,leguminose mixture general,4
+3,Grassland/pasture/meadow/forage,31,Flowering forage/fodder,3105,Other alfalfa,RPG,LUZ,9/10/2021,alfalfa general,
+3,Grassland/pasture/meadow/forage,31,Flowering forage/fodder,3106,Other clover,RPG,TRE,9/10/2021,clover general,
+3,Grassland/pasture/meadow/forage,31,Flowering forage/fodder,3107,Other sainfoin,RPG,SAI,9/10/2021,esparsette_general,3
+3,Grassland/pasture/meadow/forage,31,Flowering forage/fodder,3108,Other spring fodder peas,RPG,PFP,9/10/2021,peas spring general,
+3,Grassland/pasture/meadow/forage,31,Flowering forage/fodder,3109,Other vetch,RPG,VES,9/10/2021,vetch_general,4
+3,Grassland/pasture/meadow/forage,31,Flowering forage/fodder,3110,Other winter fodder peas,RPG,PFH,9/10/2021,peas general,
+3,Grassland/pasture/meadow/forage,31,Flowering forage/fodder,3111,Sweet pea,RPG,GES,9/10/2021,peas general,
+3,Grassland/pasture/meadow/forage,32,Non-flowering forage/fodder,3201,Fescue 5 years or less,RPG,FET,9/10/2021,,
+3,Grassland/pasture/meadow/forage,32,Non-flowering forage/fodder,3202,Fodder beetroot,RPG,BVF,9/10/2021,,
+3,Grassland/pasture/meadow/forage,32,Non-flowering forage/fodder,3203,Mixture of forage legumes (among themselves),RPG,MLF,9/10/2021,leguminose mixture general,3
+3,Grassland/pasture/meadow/forage,32,Non-flowering forage/fodder,3204,Mixture of predominant forage legumes and grains and / or oilseeds,RPG,MLC,9/10/2021,leguminose mixture general,4
+3,Grassland/pasture/meadow/forage,32,Non-flowering forage/fodder,3205,Moha,RPG,MOH,9/10/2021,,
+3,Grassland/pasture/meadow/forage,32,Non-flowering forage/fodder,3206,Other annual fodder of a different kind,RPG,FAG,9/10/2021,,
+3,Grassland/pasture/meadow/forage,32,Non-flowering forage/fodder,3207,Other pure forage grass 5 years or less,RPG,GFP,9/10/2021,,
+3,Grassland/pasture/meadow/forage,32,Non-flowering forage/fodder,3208,Other weeded forage plants,RPG,FSG,9/10/2021,,
+3,Grassland/pasture/meadow/forage,33,Grassland,3301,Buffer band,RPG,BTA,9/10/2021,grassland medium density general,2
+3,Grassland/pasture/meadow/forage,33,Grassland,3302,Digitized_grassland - mixed use,Digitized,"Grassland, digitized, mixedUse",9/27/2021,grassland low density general,3
+3,Grassland/pasture/meadow/forage,33,Grassland,3310,Natural grassland,CORINE,321,9/10/2021,grassland natural unmanaged,3
+3,Grassland/pasture/meadow/forage,33,Grassland,3311,Other temporary grassland 5 years or less,RPG,PTR,9/10/2021,grassland low density general,3
+3,Grassland/pasture/meadow/forage,34,Pasture,3406,Digitized_grassland - pasture,Digitized,"Grassland, digitized, pasture",9/10/2021,Grassland_pasture_moderate,3
+3,Grassland/pasture/meadow/forage,34,Pasture,3401,Grazed wood,RPG,BOP,9/10/2021,wood_general,4
+3,Grassland/pasture/meadow/forage,34,Pasture,3402,Pastoral area - predominant woody fodder resources,RPG,SPL,9/10/2021,no forage vegetation,4
+3,Grassland/pasture/meadow/forage,34,Pasture,3403,Pastoral area - predominantly grass and woody fodder resources present,RPG,SPH,9/10/2021,no forage vegetation,4
+3,Grassland/pasture/meadow/forage,34,Pasture,3404,Pastures,CORINE,231,9/10/2021,Grassland_pasture_moderate,3
+3,Grassland/pasture/meadow/forage,34,Pasture,3405,Permanent pasture - predominantly grass (woody fodder resources absent or scarce),RPG,PPH,9/10/2021,Grassland_pasture_moderate,3
+3,Grassland/pasture/meadow/forage,35,Meadow,3502,Digitized_grassland - orchard meadow,Digitized,"Grassland, digitized, orchardMeadow",9/10/2021,grassland orchard meadow,2
+3,Grassland/pasture/meadow/forage,35,Meadow,3503,Long rotation meadow (6 years or more),RPG,PRL,9/10/2021,grassland meadow 2 cut,3
+3,Grassland/pasture/meadow/forage,35,Meadow,3504,Ryegrass 5 years or less,RPG,RGA,9/10/2021,no forage vegetation,2
+3,Grassland/pasture/meadow/forage,35,Meadow,3505,"Digitized_grassland - meadow, CF<=2",Digitized,"Grassland, digitized, meadow - CF<=2",9/10/2021,grassland meadow <=2 cuts,3
+3,Grassland/pasture/meadow/forage,35,Meadow,3506,"Digitized_grassland - meadow, CF>=3",Digitized,"Grassland, digitized, meadow - CF>=3",9/10/2021,grassland meadow >=3 cuts,3
+4,Forest,41,Forest,4101,BDForest,BDForet,Forest,9/10/2021,wood_general,3
+4,Forest,41,Forest,4102,Broad-leaved forest,CORINE,311,9/10/2021,wood_general,3
+4,Forest,41,Forest,4103,Coniferous forest,CORINE,312,9/10/2021,wood_general,3
+4,Forest,41,Forest,4104,Mixed forest,CORINE,313,9/10/2021,wood_general,3
+4,Forest,41,Forest,4105,Permissible strip along a forest without production,RPG,BFS,9/10/2021,wood_general,3
+4,Forest,41,Forest,4106,Sclerophyllous vegetation,CORINE,323,9/10/2021,grassland medium density general,4
+4,Forest,41,Forest,4107,Short rotation coppice,RPG,TCR,9/10/2021,wood_general,4
+4,Forest,41,Forest,4108,Transitional woodland/shrub,CORINE,324,9/10/2021,wood_general,3
+4,Forest,41,Forest,4109,Wooded area on old farmland,RPG,SBO,9/10/2021,wood_general,3
+4,Forest,42,Forest margins,4201,Wood margins,BDForet,Wood margin,9/10/2021,woodmargin_general,3
+5,Developed,51,Bee-attractive developed areas,5101,Airports,CORINE,124,9/10/2021,grassland low density general,3
+5,Developed,51,Bee-attractive developed areas,5102,Discontinuous urban fabric,CORINE,12,9/10/2021,urban_general,3
+5,Developed,52,Non-bee attractive developed areas,5201,Continuous urban fabric,CORINE,11,9/10/2021,urban_general,3
+5,Developed,52,Non-bee attractive developed areas,5202,Industrial or commercial units,CORINE,121,9/10/2021,no beeforage vegetation,3
+5,Developed,52,Non-bee attractive developed areas,5203,Mineral extraction sites,CORINE,131,9/10/2021,grassland low density general,3
+5,Developed,52,Non-bee attractive developed areas,5204,Road and rail networks and associated land,CORINE,122,9/10/2021,grassland low density general,2
+5,Developed,52,Non-bee attractive developed areas,5205,Sport and leisure facilities,CORINE,142,9/10/2021,grassland low density general,3
+5,Developed,53,Roads,5301,Roads,BDTopo,Road,9/10/2021,no vegetation general,1
+5,Developed,54,Road buffers,5401,Road buffers,BDTopo,Road buffer,9/10/2021,roadmargin_1cut_general,2
+6,Water,61,Water,6101,Water,BDTopo,Water,9/10/2021,no vegetation general,1
+6,Water,61,Water,6102,Water bodies,CORINE,512,9/10/2021,no vegetation general,1
+6,Water,61,Water,6103,Water courses,CORINE,511,9/10/2021,no vegetation general,1
+6,Water,62,Water buffers,6201,Water buffer,BDTopo,Water buffer,9/10/2021,riparian,1
+7,Miscellaneous,71,Open areas,7101,"Beaches, dunes, sand",CORINE,331,9/10/2021,dunes general,2
+7,Miscellaneous,72,Open areas,7201,Sparsely vegetated areas,CORINE,333,9/10/2021,grassland medium density general,2

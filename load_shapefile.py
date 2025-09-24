@@ -51,6 +51,14 @@ def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 100
         else:
             logger.warning("Could not create beehive buffer, loading all features")
     
+    # Filter out 'Developed' land use types
+    if 'L1_label' in gdf.columns:
+        initial_count = len(gdf)
+        gdf = gdf[gdf['L1_label'] != 'Developed'].copy()
+        logger.info(f"Features after excluding 'Developed' land use: {len(gdf)} (reduced from {initial_count})")
+    else:
+        logger.warning("L1_label column not found in shapefile, skipping land use filter")
+    
     if gdf.crs and gdf.crs.to_epsg() != 4326:
         logger.info("Reprojecting to EPSG:4326")
         gdf = gdf.to_crs(epsg=4326)
@@ -71,7 +79,12 @@ def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 100
         geom_2d = strip_z_from_geom(geom)
         feature = Feature(
             name=str(row.get('name', '')),  # Adjust property names as needed
-            lulc_label=str(row.get('L1_label', '')),  # Adjust property names as needed
+            l1_code=int(row.get('L1_code')) if row.get('L1_code') is not None else None,
+            l1_label=str(row.get('L1_label', '')),
+            l2_code=int(row.get('L2_code')) if row.get('L2_code') is not None else None,
+            l2_label=str(row.get('L2_label', '')) if row.get('L2_label') else None,
+            l3_code=int(row.get('L3_code')) if row.get('L3_code') is not None else None,
+            l3_label=str(row.get('L3_label', '')) if row.get('L3_label') else None,
             geometry=geom_2d.wkt
         )
         db_session.add(feature)

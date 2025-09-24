@@ -10,11 +10,12 @@ from shapely import wkt
 import os
 from sqlalchemy import text
 from database import get_session, engine
-from models import Feature, Nectar, Pollen, BeePopulation, Base
+from models import Feature, Nectar, Pollen, BeePopulation, LandCoverVegetationMapping, Base
 from load_shapefile import load_shapefile_to_db
 from load_nectar import load_nectar_to_db
 from load_pollen import load_pollen_to_db
 from load_bee_population import load_bee_population_to_db
+from load_vegetation_mapping import load_vegetation_mapping
 from xml_parser import get_beehive_location, get_beehive_buffer_bounds
 import pickle
 import logging
@@ -32,6 +33,7 @@ app = FastAPI()
 SHAPEFILE_PATH = os.getenv("SHAPEFILE_PATH", "data/Tarn_LULC_v04.shp")
 NECTAR_PATH = os.getenv("NECTAR_PATH", "data/arr.dat")
 BEE_POPULATION_PATH = os.getenv("BEE_POPULATION_PATH", "data/output.csv")
+VEGETATION_MAPPING_PATH = os.getenv("VEGETATION_MAPPING_PATH", "data/land cover to vegetation default mapping.csv")
 # Configurable radius around beehive location (in kilometers)
 BEEHIVE_RADIUS_KM = float(os.getenv("BEEHIVE_RADIUS_KM", "5.0"))
 
@@ -53,6 +55,7 @@ def startup_event():
     
     print("DATA LOADING: Loading fresh data...")
     print(f"Using beehive radius filter: {BEEHIVE_RADIUS_KM}km")
+    load_vegetation_mapping(VEGETATION_MAPPING_PATH)
     load_shapefile_to_db(SHAPEFILE_PATH, session, 30000, BEEHIVE_RADIUS_KM)
     load_nectar_to_db(NECTAR_PATH, session)
     load_pollen_to_db(NECTAR_PATH, session)
@@ -109,11 +112,70 @@ def get_beehive_buffer():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error calculating beehive buffer: {str(e)}")
 
+@app.get("/api/vegetation-mapping")
+def get_vegetation_mapping():
+    """Get all vegetation mapping data"""
+    session = next(get_session())
+    try:
+        result = session.execute(text("SELECT * FROM land_cover_vegetation_mapping"))
+        mappings = []
+        for row in result:
+            mappings.append({
+                "id": row.id,
+                "l1_code": row.l1_code,
+                "l1_label": row.l1_label,
+                "l2_code": row.l2_code,
+                "l2_label": row.l2_label,
+                "l3_code": row.l3_code,
+                "l3_label": row.l3_label,
+                "vegetation": row.vegetation
+            })
+        return {"mappings": mappings}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+@app.get("/api/vegetation-codes-map")
+def get_vegetation_codes_map():
+    """Get vegetation mapping as a dictionary keyed by L1_code-L2_code-L3_code"""
+    session = next(get_session())
+    try:
+        result = session.execute(text("SELECT l1_code, l2_code, l3_code, vegetation FROM land_cover_vegetation_mapping"))
+        mapping_dict = {}
+        for row in result:
+            key = f"{row.l1_code}-{row.l2_code}-{row.l3_code}"
+            mapping_dict[key] = row.vegetation
+        return {"mapping": mapping_dict}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+@app.get("/api/vegetation/{l1_code}/{l2_code}/{l3_code}")
+def get_vegetation_for_codes(l1_code: int, l2_code: int, l3_code: int):
+    """Get vegetation type for specific L1, L2, L3 codes combination"""
+    session = next(get_session())
+    try:
+        result = session.execute(
+            text("SELECT vegetation FROM land_cover_vegetation_mapping WHERE l1_code = :l1 AND l2_code = :l2 AND l3_code = :l3"),
+            {"l1": l1_code, "l2": l2_code, "l3": l3_code}
+        )
+        row = result.fetchone()
+        if row:
+            return {"l1_code": l1_code, "l2_code": l2_code, "l3_code": l3_code, "vegetation": row.vegetation}
+        else:
+            raise HTTPException(status_code=404, detail=f"No vegetation mapping found for codes: {l1_code}/{l2_code}/{l3_code}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
 @app.get("/geojson")
 def get_geojson():
     session = next(get_session())
     try:
-        result = session.execute(text("SELECT id, name, lulc_label, geometry FROM features"))
+        result = session.execute(text("SELECT id, name, l1_code, l1_label, l2_code, l2_label, l3_code, l3_label, geometry FROM features"))
         features = []
         for row in result:
             geom = wkt.loads(row.geometry)
@@ -121,7 +183,15 @@ def get_geojson():
             geojson_geom = mapping(geom)
             features.append({
                 "id": row.id,
-                "properties": {"name": row.name, "L1_label": row.lulc_label},
+                "properties": {
+                    "name": row.name, 
+                    "L1_code": row.l1_code,
+                    "L1_label": row.l1_label,
+                    "L2_code": row.l2_code,
+                    "L2_label": row.l2_label,
+                    "L3_code": row.l3_code,
+                    "L3_label": row.l3_label
+                },
                 "geometry": geojson_geom
             })
         return JSONResponse(content={"type": "FeatureCollection", "features": features})
@@ -165,7 +235,7 @@ def get_geojson_viewport(
         
         # DuckDB may not have full spatial functions, so we'll do bounding box filtering in Python
         # First get all features (we'll optimize this with spatial indexing later)
-        query = text("SELECT id, name, lulc_label, geometry FROM features")
+        query = text("SELECT id, name, l1_code, l1_label, l2_code, l2_label, l3_code, l3_label, geometry FROM features")
         result = session.execute(query)
         
         features = []
@@ -188,7 +258,15 @@ def get_geojson_viewport(
                     geojson_geom = mapping(geom)
                     features.append({
                         "id": row.id,
-                        "properties": {"name": row.name, "L1_label": row.lulc_label},
+                        "properties": {
+                            "name": row.name, 
+                            "L1_code": row.l1_code,
+                            "L1_label": row.l1_label,
+                            "L2_code": row.l2_code,
+                            "L2_label": row.l2_label,
+                            "L3_code": row.l3_code,
+                            "L3_label": row.l3_label
+                        },
                         "geometry": geojson_geom
                     })
             except Exception as e:
