@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Database Management Utility for BeeForage Server
 Provides easy controls for database reset and server startup
@@ -57,9 +58,9 @@ def main():
     print(f"Current setting: RESET_DATABASE={'true' if current_reset else 'false'}")
     
     if current_reset:
-        print("   → Database will be COMPLETELY RESET on startup (all tables dropped)")
+        print("   -> Database will be COMPLETELY RESET on startup (all tables dropped)")
     else:
-        print("   → Only data will be cleared on startup (tables preserved)")
+        print("   -> Only data will be cleared on startup (tables preserved)")
     
     print()
     print("Options:")
