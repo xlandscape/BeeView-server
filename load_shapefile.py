@@ -52,14 +52,6 @@ def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 100
         else:
             logger.warning("Could not create beehive buffer, loading all features")
     
-    # Filter out 'Developed' land use types
-    if 'L1_label' in gdf.columns:
-        initial_count = len(gdf)
-        gdf = gdf[gdf['L1_label'] != 'Developed'].copy()
-        logger.info(f"Features after excluding 'Developed' land use: {len(gdf)} (reduced from {initial_count})")
-    else:
-        logger.warning("L1_label column not found in shapefile, skipping land use filter")
-    
     if gdf.crs and gdf.crs.to_epsg() != 4326:
         logger.info("Reprojecting to EPSG:4326")
         gdf = gdf.to_crs(epsg=4326)

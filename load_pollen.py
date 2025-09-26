@@ -5,7 +5,6 @@ import logging
 from sqlalchemy import text
 from models import Pollen
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def load_pollen_to_db(hdf_path: str, db_session):

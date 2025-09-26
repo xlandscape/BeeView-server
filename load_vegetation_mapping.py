@@ -1,10 +1,12 @@
 import pandas as pd
 import os
+import logging
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from database import get_database_url, Base
 from models import LandCoverVegetationMapping
 
+logger = logging.getLogger(__name__)
 
 def load_vegetation_mapping(csv_file_path: str):
     """
@@ -22,7 +24,7 @@ def load_vegetation_mapping(csv_file_path: str):
     try:
         # Read CSV file
         df = pd.read_csv(csv_file_path)
-        print(f"Loading {len(df)} vegetation mapping records from {csv_file_path}")
+        logger.info(f"Loading {len(df)} vegetation mapping records from {csv_file_path}")
         
         # Create database session
         with Session(engine) as session:
@@ -61,10 +63,10 @@ def load_vegetation_mapping(csv_file_path: str):
             
             # Commit the transaction
             session.commit()
-            print(f"Successfully loaded {len(df)} vegetation mapping records")
+            logger.info(f"Successfully loaded {len(df)} vegetation mapping records")
             
     except Exception as e:
-        print(f"Error loading vegetation mapping data: {e}")
+        logger.error(f"Error loading vegetation mapping data: {e}")
         raise
 
 
@@ -94,5 +96,5 @@ if __name__ == "__main__":
     if os.path.exists(csv_path):
         load_vegetation_mapping(csv_path)
     else:
-        print(f"CSV file not found at: {csv_path}")
-        print("Please provide the correct path to the vegetation mapping CSV file.")
+        logger.error(f"CSV file not found at: {csv_path}")
+        logger.error("Please provide the correct path to the vegetation mapping CSV file.")

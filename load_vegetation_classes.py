@@ -2,7 +2,6 @@ import json
 import logging
 from models import VegetationClassMapping
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def load_vegetation_classes_to_db(json_path: str, db_session):

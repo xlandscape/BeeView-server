@@ -28,11 +28,21 @@ logging.basicConfig(level=logging.WARNING)
 # Set specific loggers
 logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
 logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
-logging.getLogger('load_shapefile').setLevel(logging.INFO)  # If you want load_shapefile logs
+logging.getLogger('load_shapefile').setLevel(logging.INFO)
+logging.getLogger('load_feature_ids').setLevel(logging.INFO)
+logging.getLogger('load_vegetation_classes').setLevel(logging.INFO)
+logging.getLogger('load_vegetation').setLevel(logging.INFO)
+logging.getLogger('load_nectar').setLevel(logging.INFO)
+logging.getLogger('load_pollen').setLevel(logging.INFO)
+logging.getLogger('load_bee_population').setLevel(logging.INFO)
+logging.getLogger('load_vegetation_mapping').setLevel(logging.INFO)
+
+# Main app logger
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-SHAPEFILE_PATH = os.getenv("SHAPEFILE_PATH", "data/Tarn_LULC_v04.shp")
+SHAPEFILE_PATH = os.getenv("SHAPEFILE_PATH", "data/lulc.shp")
 NECTAR_PATH = os.getenv("NECTAR_PATH", "data/arr.dat")
 BEE_POPULATION_PATH = os.getenv("BEE_POPULATION_PATH", "data/output.csv")
 VEGETATION_CLASSES_PATH = os.getenv("VEGETATION_CLASSES_PATH", "data/vegetation classes.json")
@@ -55,8 +65,8 @@ def startup_event():
     # Ensure tables exist
     Base.metadata.create_all(engine)
 
-    print("DATA LOADING: Loading fresh data...")
-    print(f"Using beehive radius filter: {BEEHIVE_RADIUS_KM}km")
+    logger.info("DATA LOADING: Loading fresh data...")
+    logger.info(f"Using beehive radius filter: {BEEHIVE_RADIUS_KM}km")
 
     # Load feature IDs from HDF first
     load_feature_ids_to_db(NECTAR_PATH, session)
@@ -78,11 +88,11 @@ def startup_event():
     load_bee_population_to_db(BEE_POPULATION_PATH, session)
 
     session.close()
-    print("SERVER STARTUP: Server startup complete!")
+    logger.info("SERVER STARTUP: Server startup complete!")
 
 @app.on_event("shutdown")
 def shutdown_event():
-    print("SERVER SHUTDOWN: Server shutting down...")
+    logger.info("SERVER SHUTDOWN: Server shutting down...")
 
 @app.get("/api/features/all")
 def get_all_feature_ids():
@@ -333,7 +343,7 @@ def get_geojson_viewport(
                     })
             except Exception as e:
                 # Skip invalid geometries
-                print(f"Error processing geometry for feature {row.id}: {e}")
+                logger.warning(f"Error processing geometry for feature {row.id}: {e}")
                 continue
         
         return JSONResponse(content={

@@ -5,7 +5,6 @@ import logging
 from sqlalchemy import text
 from models import Nectar
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def load_nectar_to_db(hdf_path: str, db_session):

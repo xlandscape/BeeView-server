@@ -2,7 +2,6 @@ import h5py
 import logging
 from models import Vegetation
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def load_vegetation_to_db(hdf_path: str, db_session):

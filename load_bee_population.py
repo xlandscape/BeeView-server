@@ -6,12 +6,15 @@ Load bee population data from output.csv into the database
 import pandas as pd
 import pickle
 import numpy as np
+import logging
 from sqlalchemy.orm import Session
 from models import BeePopulation
 
+logger = logging.getLogger(__name__)
+
 def load_bee_population_to_db(csv_path: str, session: Session):
     """Load bee population data from CSV to database."""
-    print(f"Loading bee population data from {csv_path}")
+    logger.info(f"Loading bee population data from {csv_path}")
     
     # Clear existing bee population data
     session.query(BeePopulation).delete()
@@ -21,9 +24,11 @@ def load_bee_population_to_db(csv_path: str, session: Session):
     
     # Define the metrics we want to store
     metrics = [
-        "totalEggs", "totalLarvae", "totalPupae", "totalIHbees", 
-        "totalForagers", "totalIHbees + totalForagers", 
-        "totalDroneEggs", "totalDroneLarvae", "totalDronePupae", "totalDrones"
+        "TotalIHbees + TotalForagers + TotalDroneEggs + TotalEggs + TotalDroneLarvae + TotalLarvae + TotalDronePupae + TotalPupae",
+        "TotalIHbees + TotalForagers",
+        "TotalDroneEggs + TotalEggs",
+        "TotalDroneLarvae + TotalLarvae",
+        "TotalDronePupae + TotalPupae"
     ]
     
     # Store each metric as a separate record
@@ -45,10 +50,10 @@ def load_bee_population_to_db(csv_path: str, session: Session):
             )
             
             session.add(bee_pop_record)
-            print(f"Added {metric}: {len(timeseries_array)} time points")
+            logger.info(f"Added {metric}: {len(timeseries_array)} time points")
     
     session.commit()
-    print("Bee population data loading completed!")
+    logger.info("Bee population data loading completed!")
 
 if __name__ == "__main__":
     # Test loading
