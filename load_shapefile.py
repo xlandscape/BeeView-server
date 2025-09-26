@@ -1,9 +1,10 @@
 import geopandas as gpd
-from models import Feature
+from models import Feature, FeatureIds
 from shapely.geometry import MultiPolygon, Polygon
 import logging
 import numpy as np
 from xml_parser import create_beehive_buffer
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -68,16 +69,34 @@ def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 100
     if len(gdf) > subset_size:
         logger.info(f"Number of geometries is {len(gdf)}. Selecting random subset of size {subset_size}")
         gdf = gdf.sample(n=subset_size, random_state=None)
+
+    # Clear existing features
+    db_session.query(Feature).delete()
+
+    # Get available feature IDs from the feature_ids table
+    result = db_session.execute(text("SELECT feature_id FROM feature_ids ORDER BY feature_id"))
+    available_feature_ids = [row[0] for row in result.fetchall()]
+    logger.info(f"Available feature IDs: {len(available_feature_ids)}")
+
+    feature_id_index = 0
     for _, row in gdf.iterrows():
         geom = row['geometry']
         if geom is None or geom.is_empty:
             continue
+
+        # Skip if we've run out of feature IDs
+        if feature_id_index >= len(available_feature_ids):
+            logger.warning(f"Ran out of feature IDs. Only loaded {feature_id_index} features out of {len(gdf)}")
+            break
+
         # Ensure MultiPolygon
         if geom.geom_type == 'Polygon':
             geom = MultiPolygon([geom])
         # Strip Z from all polygons
         geom_2d = strip_z_from_geom(geom)
+
         feature = Feature(
+            feature_id=available_feature_ids[feature_id_index],
             name=str(row.get('name', '')),  # Adjust property names as needed
             l1_code=int(row.get('L1_code')) if row.get('L1_code') is not None else None,
             l1_label=str(row.get('L1_label', '')),
@@ -88,4 +107,7 @@ def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 100
             geometry=geom_2d.wkt
         )
         db_session.add(feature)
+        feature_id_index += 1
+
     db_session.commit()
+    logger.info(f"Loaded {feature_id_index} features with mapped feature IDs")

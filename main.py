@@ -10,12 +10,14 @@ from shapely import wkt
 import os
 from sqlalchemy import text
 from database import get_session, engine
-from models import Feature, Nectar, Pollen, BeePopulation, LandCoverVegetationMapping, Base
+from models import Feature, Nectar, Pollen, BeePopulation, FeatureIds, VegetationClassMapping, Vegetation, Base
 from load_shapefile import load_shapefile_to_db
 from load_nectar import load_nectar_to_db
 from load_pollen import load_pollen_to_db
 from load_bee_population import load_bee_population_to_db
-from load_vegetation_mapping import load_vegetation_mapping
+from load_feature_ids import load_feature_ids_to_db
+from load_vegetation_classes import load_vegetation_classes_to_db
+from load_vegetation import load_vegetation_to_db
 from xml_parser import get_beehive_location, get_beehive_buffer_bounds
 import pickle
 import logging
@@ -33,9 +35,9 @@ app = FastAPI()
 SHAPEFILE_PATH = os.getenv("SHAPEFILE_PATH", "data/Tarn_LULC_v04.shp")
 NECTAR_PATH = os.getenv("NECTAR_PATH", "data/arr.dat")
 BEE_POPULATION_PATH = os.getenv("BEE_POPULATION_PATH", "data/output.csv")
-VEGETATION_MAPPING_PATH = os.getenv("VEGETATION_MAPPING_PATH", "data/land cover to vegetation default mapping.csv")
+VEGETATION_CLASSES_PATH = os.getenv("VEGETATION_CLASSES_PATH", "data/vegetation classes.json")
 # Configurable radius around beehive location (in kilometers)
-BEEHIVE_RADIUS_KM = float(os.getenv("BEEHIVE_RADIUS_KM", "5.0"))
+BEEHIVE_RADIUS_KM = float(os.getenv("BEEHIVE_RADIUS_KM", "30.0"))
 
 # Allow all origins (for development)
 app.add_middleware(
@@ -49,17 +51,32 @@ app.add_middleware(
 @app.on_event("startup")
 def startup_event():
     session = next(get_session())
-    
+
     # Ensure tables exist
     Base.metadata.create_all(engine)
-    
+
     print("DATA LOADING: Loading fresh data...")
     print(f"Using beehive radius filter: {BEEHIVE_RADIUS_KM}km")
-    load_vegetation_mapping(VEGETATION_MAPPING_PATH)
+
+    # Load feature IDs from HDF first
+    load_feature_ids_to_db(NECTAR_PATH, session)
+
+    # Load vegetation class mapping from JSON
+    load_vegetation_classes_to_db(VEGETATION_CLASSES_PATH, session)
+
+    # Load vegetation data from HDF
+    load_vegetation_to_db(NECTAR_PATH, session)
+
+    # Load shapefile and map to feature IDs
     load_shapefile_to_db(SHAPEFILE_PATH, session, 30000, BEEHIVE_RADIUS_KM)
+
+    # Load nectar and pollen data
     load_nectar_to_db(NECTAR_PATH, session)
     load_pollen_to_db(NECTAR_PATH, session)
+
+    # Load bee population data
     load_bee_population_to_db(BEE_POPULATION_PATH, session)
+
     session.close()
     print("SERVER STARTUP: Server startup complete!")
 
@@ -112,60 +129,105 @@ def get_beehive_buffer():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error calculating beehive buffer: {str(e)}")
 
-@app.get("/api/vegetation-mapping")
-def get_vegetation_mapping():
-    """Get all vegetation mapping data"""
+@app.get("/api/vegetation-classes")
+def get_vegetation_classes():
+    """Get all vegetation class mappings"""
     session = next(get_session())
     try:
-        result = session.execute(text("SELECT * FROM land_cover_vegetation_mapping"))
+        result = session.execute(text("SELECT vegetation_name, vegetation_class FROM vegetation_class_mapping"))
+        mappings = {}
+        for row in result:
+            mappings[row.vegetation_name] = row.vegetation_class
+        return {"vegetation_classes": mappings}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+@app.get("/api/vegetation/feature/{feature_id}")
+def get_vegetation_for_feature(feature_id: int):
+    """Get vegetation class for a specific feature using the new mapping system"""
+    session = next(get_session())
+    try:
+        # Get the feature's actual feature_id from the features table
+        feature_result = session.execute(text("SELECT feature_id FROM features WHERE id = :fid"), {"fid": feature_id})
+        feature_row = feature_result.fetchone()
+
+        if not feature_row or feature_row.feature_id is None:
+            raise HTTPException(status_code=404, detail=f"Feature {feature_id} not found or has no mapped feature_id")
+
+        actual_feature_id = feature_row.feature_id
+
+        # Get the index for this feature_id
+        index_result = session.execute(text("SELECT index FROM feature_ids WHERE feature_id = :fid"), {"fid": actual_feature_id})
+        index_row = index_result.fetchone()
+
+        if not index_row:
+            raise HTTPException(status_code=404, detail=f"No index found for feature_id {actual_feature_id}")
+
+        feature_index = index_row.index
+
+        # Get the vegetation class for this feature index
+        veg_result = session.execute(text("SELECT vegetation_class FROM vegetation WHERE feature_index = :idx"), {"idx": feature_index})
+        veg_row = veg_result.fetchone()
+
+        if not veg_row:
+            raise HTTPException(status_code=404, detail=f"No vegetation data found for feature index {feature_index}")
+
+        return {
+            "feature_id": feature_id,
+            "actual_feature_id": actual_feature_id,
+            "feature_index": feature_index,
+            "vegetation_class": veg_row.vegetation_class
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+@app.get("/api/vegetation/class/{vegetation_class}")
+def get_vegetation_class_name(vegetation_class: int):
+    """Get vegetation name for a specific vegetation class"""
+    session = next(get_session())
+    try:
+        result = session.execute(text("SELECT vegetation_name FROM vegetation_class_mapping WHERE vegetation_class = :vc"), {"vc": vegetation_class})
+        row = result.fetchone()
+        if row:
+            return {"vegetation_class": vegetation_class, "vegetation_name": row.vegetation_name}
+        else:
+            raise HTTPException(status_code=404, detail=f"No vegetation name found for class: {vegetation_class}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+@app.get("/api/features/vegetation-mapping")
+def get_features_vegetation_mapping():
+    """Get vegetation classes for all features"""
+    session = next(get_session())
+    try:
+        query = text("""
+            SELECT f.id as feature_db_id, f.feature_id, fi.index, v.vegetation_class, vcm.vegetation_name
+            FROM features f
+            LEFT JOIN feature_ids fi ON f.feature_id = fi.feature_id
+            LEFT JOIN vegetation v ON fi.index = v.feature_index
+            LEFT JOIN vegetation_class_mapping vcm ON v.vegetation_class = vcm.vegetation_class
+            WHERE f.feature_id IS NOT NULL
+            ORDER BY f.id
+        """)
+        result = session.execute(query)
+
         mappings = []
         for row in result:
             mappings.append({
-                "id": row.id,
-                "l1_code": row.l1_code,
-                "l1_label": row.l1_label,
-                "l2_code": row.l2_code,
-                "l2_label": row.l2_label,
-                "l3_code": row.l3_code,
-                "l3_label": row.l3_label,
-                "vegetation": row.vegetation
+                "feature_id": row.feature_db_id,
+                "actual_feature_id": row.feature_id,
+                "feature_index": row.index,
+                "vegetation_class": row.vegetation_class,
+                "vegetation_name": row.vegetation_name
             })
-        return {"mappings": mappings}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
 
-@app.get("/api/vegetation-codes-map")
-def get_vegetation_codes_map():
-    """Get vegetation mapping as a dictionary keyed by L1_code-L2_code-L3_code"""
-    session = next(get_session())
-    try:
-        result = session.execute(text("SELECT l1_code, l2_code, l3_code, vegetation FROM land_cover_vegetation_mapping"))
-        mapping_dict = {}
-        for row in result:
-            key = f"{row.l1_code}-{row.l2_code}-{row.l3_code}"
-            mapping_dict[key] = row.vegetation
-        return {"mapping": mapping_dict}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
-
-@app.get("/api/vegetation/{l1_code}/{l2_code}/{l3_code}")
-def get_vegetation_for_codes(l1_code: int, l2_code: int, l3_code: int):
-    """Get vegetation type for specific L1, L2, L3 codes combination"""
-    session = next(get_session())
-    try:
-        result = session.execute(
-            text("SELECT vegetation FROM land_cover_vegetation_mapping WHERE l1_code = :l1 AND l2_code = :l2 AND l3_code = :l3"),
-            {"l1": l1_code, "l2": l2_code, "l3": l3_code}
-        )
-        row = result.fetchone()
-        if row:
-            return {"l1_code": l1_code, "l2_code": l2_code, "l3_code": l3_code, "vegetation": row.vegetation}
-        else:
-            raise HTTPException(status_code=404, detail=f"No vegetation mapping found for codes: {l1_code}/{l2_code}/{l3_code}")
+        return {"feature_vegetation_mappings": mappings}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -291,7 +353,11 @@ def get_geojson_viewport(
 def get_nectar_max():
     session = next(get_session())
     try:
-        result = session.execute(text("SELECT feature_id, timeseries FROM nectar"))
+        result = session.execute(text("""
+            SELECT fi.feature_id, n.timeseries 
+            FROM nectar n 
+            JOIN feature_ids fi ON n.feature_index = fi.index
+        """))
         max_vals = []
         for row in result:
             timeseries = pickle.loads(row.timeseries)
@@ -335,7 +401,12 @@ def get_nectar_max_viewport(
         
         # Get nectar data for viewport features
         feature_ids_str = ','.join(map(str, viewport_feature_ids))
-        nectar_query = text(f"SELECT feature_id, timeseries FROM nectar WHERE feature_id IN ({feature_ids_str})")
+        nectar_query = text(f"""
+            SELECT fi.feature_id, n.timeseries 
+            FROM nectar n 
+            JOIN feature_ids fi ON n.feature_index = fi.index 
+            WHERE fi.feature_id IN ({feature_ids_str})
+        """)
         nectar_result = session.execute(nectar_query)
         
         max_vals = []
@@ -361,7 +432,12 @@ def stream_nectar():
 def get_nectar_timeseries(feature_id: str):
     session = next(get_session())
     try:
-        result = session.execute(text(f"SELECT timeseries FROM nectar WHERE feature_id = {int(feature_id)}"))
+        result = session.execute(text("""
+            SELECT n.timeseries 
+            FROM nectar n 
+            JOIN feature_ids fi ON n.feature_index = fi.index 
+            WHERE fi.feature_id = :feature_id
+        """), {"feature_id": int(feature_id)})
         nectar_obj = result.fetchone()
         if nectar_obj is None:
             raise HTTPException(status_code=404, detail="Feature ID not found or no nectar data")
@@ -376,7 +452,11 @@ def get_nectar_timeseries(feature_id: str):
 def get_pollen_max():
     session = next(get_session())
     try:
-        result = session.execute(text("SELECT feature_id, timeseries FROM pollen"))
+        result = session.execute(text("""
+            SELECT fi.feature_id, p.timeseries 
+            FROM pollen p 
+            JOIN feature_ids fi ON p.feature_index = fi.index
+        """))
         max_vals = []
         for row in result:
             timeseries = pickle.loads(row.timeseries)
@@ -420,7 +500,12 @@ def get_pollen_max_viewport(
         
         # Get pollen data for viewport features
         feature_ids_str = ','.join(map(str, viewport_feature_ids))
-        pollen_query = text(f"SELECT feature_id, timeseries FROM pollen WHERE feature_id IN ({feature_ids_str})")
+        pollen_query = text(f"""
+            SELECT fi.feature_id, p.timeseries 
+            FROM pollen p 
+            JOIN feature_ids fi ON p.feature_index = fi.index 
+            WHERE fi.feature_id IN ({feature_ids_str})
+        """)
         pollen_result = session.execute(pollen_query)
         
         max_vals = []
@@ -437,7 +522,12 @@ def get_pollen_max_viewport(
 def get_pollen_timeseries(feature_id: str):
     session = next(get_session())
     try:
-        result = session.execute(text(f"SELECT timeseries FROM pollen WHERE feature_id = {int(feature_id)}"))
+        result = session.execute(text("""
+            SELECT p.timeseries 
+            FROM pollen p 
+            JOIN feature_ids fi ON p.feature_index = fi.index 
+            WHERE fi.feature_id = :feature_id
+        """), {"feature_id": int(feature_id)})
         pollen_obj = result.fetchone()
         if pollen_obj is None:
             raise HTTPException(status_code=404, detail="Feature ID not found or no pollen data")
@@ -463,7 +553,12 @@ def get_nectar_timeseries_data():
     session = next(get_session())
     try:
         # Get sample timeseries data for visualization
-        result = session.execute(text("SELECT feature_id, timeseries FROM nectar LIMIT 10"))
+        result = session.execute(text("""
+            SELECT fi.feature_id, n.timeseries 
+            FROM nectar n 
+            JOIN feature_ids fi ON n.feature_index = fi.index 
+            LIMIT 10
+        """))
         timeseries_data = []
         
         # Mock dates for demonstration (replace with actual date logic from your data)
@@ -501,7 +596,11 @@ def get_nectar_for_time_point(date: str):
     """Get nectar values for all features at a specific time point."""
     session = next(get_session())
     try:
-        result = session.execute(text("SELECT feature_id, timeseries FROM nectar"))
+        result = session.execute(text("""
+            SELECT fi.feature_id, n.timeseries 
+            FROM nectar n 
+            JOIN feature_ids fi ON n.feature_index = fi.index
+        """))
         time_point_data = []
         
         # Convert date to time index
@@ -589,7 +688,12 @@ def get_nectar_for_time_point_viewport(
         
         # Get nectar data for viewport features
         feature_ids_str = ','.join(map(str, viewport_feature_ids))
-        nectar_query = text(f"SELECT feature_id, timeseries FROM nectar WHERE feature_id IN ({feature_ids_str})")
+        nectar_query = text(f"""
+            SELECT fi.feature_id, n.timeseries 
+            FROM nectar n 
+            JOIN feature_ids fi ON n.feature_index = fi.index 
+            WHERE fi.feature_id IN ({feature_ids_str})
+        """)
         nectar_result = session.execute(nectar_query)
         
         time_point_data = []
@@ -617,7 +721,11 @@ def get_pollen_for_time_point(date: str):
     """Get pollen values for all features at a specific time point."""
     session = next(get_session())
     try:
-        result = session.execute(text("SELECT feature_id, timeseries FROM pollen"))
+        result = session.execute(text("""
+            SELECT fi.feature_id, p.timeseries 
+            FROM pollen p 
+            JOIN feature_ids fi ON p.feature_index = fi.index
+        """))
         time_point_data = []
         
         # Convert date to time index
@@ -695,7 +803,12 @@ def get_pollen_for_time_point_viewport(
             time_index = 0
         
         feature_ids_str = ','.join(map(str, viewport_feature_ids))
-        pollen_query = text(f"SELECT feature_id, timeseries FROM pollen WHERE feature_id IN ({feature_ids_str})")
+        pollen_query = text(f"""
+            SELECT fi.feature_id, p.timeseries 
+            FROM pollen p 
+            JOIN feature_ids fi ON p.feature_index = fi.index 
+            WHERE fi.feature_id IN ({feature_ids_str})
+        """)
         pollen_result = session.execute(pollen_query)
         
         time_point_data = []
@@ -744,10 +857,19 @@ def get_timeseries_averages(feature_ids: str = None, include_nectar: bool = True
         if include_nectar:
             # Single query to get all nectar timeseries
             if use_all_features:
-                nectar_query = text("SELECT timeseries FROM nectar")
+                nectar_query = text("""
+                    SELECT n.timeseries 
+                    FROM nectar n 
+                    JOIN feature_ids fi ON n.feature_index = fi.index
+                """)
             else:
                 feature_ids_str = ','.join(map(str, feature_ids_list))
-                nectar_query = text(f"SELECT timeseries FROM nectar WHERE feature_id IN ({feature_ids_str})")
+                nectar_query = text(f"""
+                    SELECT n.timeseries 
+                    FROM nectar n 
+                    JOIN feature_ids fi ON n.feature_index = fi.index 
+                    WHERE fi.feature_id IN ({feature_ids_str})
+                """)
             
             nectar_result = session.execute(nectar_query)
             for row in nectar_result:
@@ -758,10 +880,19 @@ def get_timeseries_averages(feature_ids: str = None, include_nectar: bool = True
         if include_pollen:
             # Single query to get all pollen timeseries
             if use_all_features:
-                pollen_query = text("SELECT timeseries FROM pollen")
+                pollen_query = text("""
+                    SELECT p.timeseries 
+                    FROM pollen p 
+                    JOIN feature_ids fi ON p.feature_index = fi.index
+                """)
             else:
                 feature_ids_str = ','.join(map(str, feature_ids_list))
-                pollen_query = text(f"SELECT timeseries FROM pollen WHERE feature_id IN ({feature_ids_str})")
+                pollen_query = text(f"""
+                    SELECT p.timeseries 
+                    FROM pollen p 
+                    JOIN feature_ids fi ON p.feature_index = fi.index 
+                    WHERE fi.feature_id IN ({feature_ids_str})
+                """)
             
             pollen_result = session.execute(pollen_query)
             for row in pollen_result:

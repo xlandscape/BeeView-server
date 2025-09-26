@@ -1,25 +1,33 @@
-from sqlalchemy import Integer, String, LargeBinary, Sequence, ForeignKey, Date
+from sqlalchemy import Integer, String, LargeBinary, Sequence, ForeignKey, Date, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base
 
-class LandCoverVegetationMapping(Base):
-    __tablename__ = "land_cover_vegetation_mapping"
-    id: Mapped[int] = mapped_column(Integer, Sequence('lc_veg_mapping_id_seq'), primary_key=True)
-    l1_code: Mapped[int] = mapped_column(Integer)
-    l1_label: Mapped[str] = mapped_column(String(100))
-    l2_code: Mapped[int] = mapped_column(Integer)
-    l2_label: Mapped[str] = mapped_column(String(100))
-    l3_code: Mapped[int] = mapped_column(Integer)
-    l3_label: Mapped[str] = mapped_column(String(200))
-    data_source: Mapped[str] = mapped_column(String(50), nullable=True)
-    source_code: Mapped[str] = mapped_column(String(50), nullable=True)
-    last_change: Mapped[str] = mapped_column(String(20), nullable=True)  # Store as string since format varies
-    vegetation: Mapped[str] = mapped_column(String(100))
-    vegetation_certainty: Mapped[str] = mapped_column(String(50), nullable=True)
+class FeatureIds(Base):
+    __tablename__ = "feature_ids"
+    __table_args__ = (
+        UniqueConstraint('feature_id', name='unique_feature_id'),
+    )
+    index: Mapped[int] = mapped_column(Integer, Sequence('feature_ids_index_seq'), primary_key=True)
+    feature_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+class VegetationClassMapping(Base):
+    __tablename__ = "vegetation_class_mapping"
+    id: Mapped[int] = mapped_column(Integer, Sequence('veg_class_mapping_id_seq'), primary_key=True)
+    vegetation_name: Mapped[str] = mapped_column(String(100), unique=True)
+    vegetation_class: Mapped[int] = mapped_column(Integer)
+
+class Vegetation(Base):
+    __tablename__ = "vegetation"
+    id: Mapped[int] = mapped_column(Integer, Sequence('vegetation_id_seq'), primary_key=True)
+    feature_index: Mapped[int] = mapped_column(Integer, ForeignKey("feature_ids.index"))
+    vegetation_class: Mapped[int] = mapped_column(Integer)
+
+    feature_id_ref = relationship("FeatureIds")
 
 class Feature(Base):
     __tablename__ = "features"
     id: Mapped[int] = mapped_column(Integer, Sequence('feature_id_seq'), primary_key=True)
+    feature_id: Mapped[int] = mapped_column(Integer, ForeignKey("feature_ids.feature_id"), nullable=True)
     name: Mapped[str] = mapped_column(String(100))
     l1_code: Mapped[int] = mapped_column(Integer, nullable=True)
     l1_label: Mapped[str] = mapped_column(String(100))
@@ -28,29 +36,21 @@ class Feature(Base):
     l3_code: Mapped[int] = mapped_column(Integer, nullable=True)
     l3_label: Mapped[str] = mapped_column(String(200), nullable=True)
     geometry: Mapped[str] = mapped_column(String)
-    nectar = relationship("Nectar", back_populates="feature", cascade="all, delete-orphan")
-    pollen = relationship("Pollen", back_populates="feature", cascade="all, delete-orphan")
-    
-    # Add relationship to vegetation mapping via L1_code, L2_code, L3_code
-    @property
-    def vegetation_mapping(self):
-        # This will be used to get vegetation info via code combination
-        # We'll implement a method to query this in the application layer
-        return None
+    feature_id_ref = relationship("FeatureIds", foreign_keys=[feature_id])
 
 class Nectar(Base):
     __tablename__ = "nectar"
     id: Mapped[int] = mapped_column(Integer, Sequence('nectar_id_seq'), primary_key=True)
-    feature_id: Mapped[int] = mapped_column(Integer, ForeignKey("features.id"))
+    feature_index: Mapped[int] = mapped_column(Integer, ForeignKey("feature_ids.index"))
     timeseries: Mapped[bytes] = mapped_column(LargeBinary)
-    feature = relationship("Feature", back_populates="nectar")
+    feature_id_ref = relationship("FeatureIds")
 
 class Pollen(Base):
     __tablename__ = "pollen"
     id: Mapped[int] = mapped_column(Integer, Sequence('pollen_id_seq'), primary_key=True)
-    feature_id: Mapped[int] = mapped_column(Integer, ForeignKey("features.id"))
+    feature_index: Mapped[int] = mapped_column(Integer, ForeignKey("feature_ids.index"))
     timeseries: Mapped[bytes] = mapped_column(LargeBinary)
-    feature = relationship("Feature", back_populates="pollen")
+    feature_id_ref = relationship("FeatureIds")
 
 class BeePopulation(Base):
     __tablename__ = "bee_population"
