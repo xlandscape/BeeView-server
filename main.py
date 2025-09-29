@@ -159,21 +159,12 @@ def get_vegetation_for_feature(feature_id: int):
     """Get vegetation class for a specific feature using the new mapping system"""
     session = next(get_session())
     try:
-        # Get the feature's actual feature_id from the features table
-        feature_result = session.execute(text("SELECT feature_id FROM features WHERE id = :fid"), {"fid": feature_id})
-        feature_row = feature_result.fetchone()
-
-        if not feature_row or feature_row.feature_id is None:
-            raise HTTPException(status_code=404, detail=f"Feature {feature_id} not found or has no mapped feature_id")
-
-        actual_feature_id = feature_row.feature_id
-
-        # Get the index for this feature_id
-        index_result = session.execute(text("SELECT index FROM feature_ids WHERE feature_id = :fid"), {"fid": actual_feature_id})
+        # Get the index for this feature_id directly (feature_id is now the parameter we receive)
+        index_result = session.execute(text("SELECT index FROM feature_ids WHERE feature_id = :fid"), {"fid": feature_id})
         index_row = index_result.fetchone()
 
         if not index_row:
-            raise HTTPException(status_code=404, detail=f"No index found for feature_id {actual_feature_id}")
+            raise HTTPException(status_code=404, detail=f"No index found for feature_id {feature_id}")
 
         feature_index = index_row.index
 
@@ -186,8 +177,6 @@ def get_vegetation_for_feature(feature_id: int):
 
         return {
             "feature_id": feature_id,
-            "actual_feature_id": actual_feature_id,
-            "feature_index": feature_index,
             "vegetation_class": veg_row.vegetation_class
         }
     except Exception as e:
@@ -217,22 +206,20 @@ def get_features_vegetation_mapping():
     session = next(get_session())
     try:
         query = text("""
-            SELECT f.id as feature_db_id, f.feature_id, fi.index, v.vegetation_class, vcm.vegetation_name
+            SELECT f.feature_id, v.vegetation_class, vcm.vegetation_name
             FROM features f
             LEFT JOIN feature_ids fi ON f.feature_id = fi.feature_id
             LEFT JOIN vegetation v ON fi.index = v.feature_index
             LEFT JOIN vegetation_class_mapping vcm ON v.vegetation_class = vcm.vegetation_class
             WHERE f.feature_id IS NOT NULL
-            ORDER BY f.id
+            ORDER BY f.feature_id
         """)
         result = session.execute(query)
 
         mappings = []
         for row in result:
             mappings.append({
-                "feature_id": row.feature_db_id,
-                "actual_feature_id": row.feature_id,
-                "feature_index": row.index,
+                "feature_id": row.feature_id,  # Use the actual shapefile feature_id consistently
                 "vegetation_class": row.vegetation_class,
                 "vegetation_name": row.vegetation_name
             })
@@ -247,14 +234,14 @@ def get_features_vegetation_mapping():
 def get_geojson():
     session = next(get_session())
     try:
-        result = session.execute(text("SELECT id, name, l1_code, l1_label, l2_code, l2_label, l3_code, l3_label, geometry FROM features"))
+        result = session.execute(text("SELECT id, feature_id, name, l1_code, l1_label, l2_code, l2_label, l3_code, l3_label, geometry FROM features"))
         features = []
         for row in result:
             geom = wkt.loads(row.geometry)
             # geom = geom.simplify(0.1, preserve_topology=True)
             geojson_geom = mapping(geom)
             features.append({
-                "id": row.id,
+                "id": row.feature_id,
                 "properties": {
                     "name": row.name, 
                     "L1_code": row.l1_code,
@@ -307,7 +294,7 @@ def get_geojson_viewport(
         
         # DuckDB may not have full spatial functions, so we'll do bounding box filtering in Python
         # First get all features (we'll optimize this with spatial indexing later)
-        query = text("SELECT id, name, l1_code, l1_label, l2_code, l2_label, l3_code, l3_label, geometry FROM features")
+        query = text("SELECT id, feature_id, name, l1_code, l1_label, l2_code, l2_label, l3_code, l3_label, geometry FROM features")
         result = session.execute(query)
         
         features = []
@@ -329,7 +316,7 @@ def get_geojson_viewport(
                     
                     geojson_geom = mapping(geom)
                     features.append({
-                        "id": row.id,
+                        "id": row.feature_id,
                         "properties": {
                             "name": row.name, 
                             "L1_code": row.l1_code,
