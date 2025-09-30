@@ -33,24 +33,24 @@ def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 100
     original_crs = gdf.crs
     
     # Apply beehive radius filter if specified
-    if beehive_radius_km is not None and beehive_radius_km > 0:
-        logger.info(f"Applying beehive radius filter: {beehive_radius_km}km")
-        
-        # Get buffer around beehive location in the original CRS
-        buffer_gdf = create_beehive_buffer(beehive_radius_km)
-        
-        if buffer_gdf is not None:
-            # Ensure both GeoDataFrames are in the same CRS
-            buffer_gdf = buffer_gdf.to_crs(original_crs)
-            
-            # Filter geometries that intersect with the buffer
-            intersects = gdf.geometry.intersects(buffer_gdf.geometry.iloc[0])
-            gdf_filtered = gdf[intersects].copy()
-            
-            logger.info(f"Features after radius filter: {len(gdf_filtered)} (reduced from {len(gdf)})")
-            gdf = gdf_filtered
-        else:
-            logger.warning("Could not create beehive buffer, loading all features")
+    # if beehive_radius_km is not None and beehive_radius_km > 0:
+    #     logger.info(f"Applying beehive radius filter: {beehive_radius_km}km")
+    #
+    #     # Get buffer around beehive location in the original CRS
+    #     buffer_gdf = create_beehive_buffer(beehive_radius_km)
+    #
+    #     if buffer_gdf is not None:
+    #         # Ensure both GeoDataFrames are in the same CRS
+    #         buffer_gdf = buffer_gdf.to_crs(original_crs)
+    #
+    #         # Filter geometries that intersect with the buffer
+    #         intersects = gdf.geometry.intersects(buffer_gdf.geometry.iloc[0])
+    #         gdf_filtered = gdf[intersects].copy()
+    #
+    #         logger.info(f"Features after radius filter: {len(gdf_filtered)} (reduced from {len(gdf)})")
+    #         gdf = gdf_filtered
+    #     else:
+    #         logger.warning("Could not create beehive buffer, loading all features")
     
     if gdf.crs and gdf.crs.to_epsg() != 4326:
         logger.info("Reprojecting to EPSG:4326")
