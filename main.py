@@ -1077,6 +1077,108 @@ def get_applications(feature_ids: str = None):
         logger.error(f"Error reading applications data: {e}")
         return {"applications": [], "error": str(e)}
 
+@app.get("/api/exposure/timeseries")
+def get_exposure_timeseries(feature_ids: str = None):
+    """
+    Get exposure time series data for nectar, pollen, and contact values.
+    
+    For each application:
+    1. Extend exposure for 9 days starting at application_day
+    2. Sum overlapping exposures within the same feature
+    3. Sum across all selected features for final daily values
+    
+    Args:
+        feature_ids: Optional comma-separated list of feature IDs to filter by
+    
+    Returns:
+        JSON with exposure time series for nectar, pollen, and contact
+    """
+    try:
+        # Get applications data using the existing endpoint logic
+        applications_file = "data/applications.txt"
+        if not os.path.exists(applications_file):
+            return {"exposure_timeseries": [], "message": "Applications data file not found"}
+        
+        # Read and parse the applications file
+        applications = []
+        with open(applications_file, 'r') as f:
+            lines = f.readlines()
+        
+        # Skip header line
+        for line in lines[1:]:
+            line = line.strip()
+            if not line:
+                continue
+                
+            parts = line.split(',')
+            if len(parts) >= 5:
+                try:
+                    application = {
+                        "lulc_feature_id": int(parts[0]),
+                        "application_day": int(parts[1]),
+                        "conc_nectar": float(parts[2]),
+                        "conc_pollen": float(parts[3]),
+                        "contact": float(parts[4])
+                    }
+                    applications.append(application)
+                except (ValueError, IndexError) as e:
+                    # Skip malformed lines
+                    continue
+        
+        # Filter by feature IDs if provided
+        if feature_ids:
+            try:
+                feature_id_list = [int(fid.strip()) for fid in feature_ids.split(',')]
+                applications = [app for app in applications if app["lulc_feature_id"] in feature_id_list]
+            except ValueError:
+                return {"error": "Invalid feature_ids parameter"}
+        
+        # Initialize exposure arrays for 365 days
+        exposure_data = {}
+        
+        # Process each application
+        for app in applications:
+            feature_id = app["lulc_feature_id"]
+            start_day = app["application_day"]
+            
+            # Initialize feature if not exists
+            if feature_id not in exposure_data:
+                exposure_data[feature_id] = {
+                    "nectar": [0.0] * 365,
+                    "pollen": [0.0] * 365, 
+                    "contact": [0.0] * 365
+                }
+            
+            # Extend exposure for 9 days starting at application_day
+            for i in range(9):
+                day_index = start_day + i - 1  # Convert to 0-based index
+                if 0 <= day_index < 365:  # Ensure within bounds
+                    exposure_data[feature_id]["nectar"][day_index] += app["conc_nectar"]
+                    exposure_data[feature_id]["pollen"][day_index] += app["conc_pollen"]
+                    exposure_data[feature_id]["contact"][day_index] += app["contact"]
+        
+        # Sum across all selected features for final daily values
+        final_timeseries = []
+        for day in range(1, 366):  # Days 1-365
+            day_index = day - 1
+            
+            nectar_sum = sum(feature_data["nectar"][day_index] for feature_data in exposure_data.values())
+            pollen_sum = sum(feature_data["pollen"][day_index] for feature_data in exposure_data.values())
+            contact_sum = sum(feature_data["contact"][day_index] for feature_data in exposure_data.values())
+            
+            final_timeseries.append({
+                "day": day,
+                "nectar_exposure": nectar_sum,
+                "pollen_exposure": pollen_sum,
+                "contact_exposure": contact_sum
+            })
+        
+        return {"exposure_timeseries": final_timeseries}
+        
+    except Exception as e:
+        logger.error(f"Error calculating exposure timeseries: {e}")
+        return {"exposure_timeseries": [], "error": str(e)}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
