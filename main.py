@@ -60,35 +60,64 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup_event():
+    # Check if database file exists
+    db_file_path = "data/beeview.duckdb"
+    database_exists = os.path.exists(db_file_path)
+    
     session = next(get_session())
-
-    # Ensure tables exist
+    
+    # Always ensure tables exist (safe operation)
     Base.metadata.create_all(engine)
-
+    
+    if database_exists:
+        # Check if database has data
+        from sqlalchemy import text
+        try:
+            result = session.execute(text("SELECT COUNT(*) FROM features"))
+            feature_count = result.scalar()
+            
+            if feature_count > 0:
+                logger.info(f"DATABASE: Using existing database with {feature_count} features")
+                logger.info("SERVER STARTUP: Server startup complete (using existing data)!")
+                session.close()
+                return
+            else:
+                logger.info("DATABASE: Database exists but is empty, loading fresh data...")
+        except Exception as e:
+            logger.info(f"DATABASE: Database exists but appears corrupted ({e}), loading fresh data...")
+    else:
+        logger.info("DATABASE: No database found, creating and loading fresh data...")
+    
+    # Load fresh data
     logger.info("DATA LOADING: Loading fresh data...")
     logger.info(f"Using beehive radius filter: {BEEHIVE_RADIUS_KM}km")
 
-    # Load feature IDs from HDF first
-    load_feature_ids_to_db(NECTAR_PATH, session)
+    try:
+        # Load feature IDs from HDF first
+        load_feature_ids_to_db(NECTAR_PATH, session)
 
-    # Load vegetation class mapping from JSON
-    load_vegetation_classes_to_db(VEGETATION_CLASSES_PATH, session)
+        # Load vegetation class mapping from JSON
+        load_vegetation_classes_to_db(VEGETATION_CLASSES_PATH, session)
 
-    # Load vegetation data from HDF
-    load_vegetation_to_db(NECTAR_PATH, session)
+        # Load vegetation data from HDF
+        load_vegetation_to_db(NECTAR_PATH, session)
 
-    # Load shapefile and map to feature IDs
-    load_shapefile_to_db(SHAPEFILE_PATH, session, 30000, BEEHIVE_RADIUS_KM)
+        # Load shapefile and map to feature IDs
+        load_shapefile_to_db(SHAPEFILE_PATH, session, 30000, BEEHIVE_RADIUS_KM)
 
-    # Load nectar and pollen data
-    load_nectar_to_db(NECTAR_PATH, session)
-    load_pollen_to_db(NECTAR_PATH, session)
+        # Load nectar and pollen data
+        load_nectar_to_db(NECTAR_PATH, session)
+        load_pollen_to_db(NECTAR_PATH, session)
 
-    # Load bee population data
-    load_bee_population_to_db(BEE_POPULATION_PATH, session)
-
-    session.close()
-    logger.info("SERVER STARTUP: Server startup complete!")
+        # Load bee population data
+        load_bee_population_to_db(BEE_POPULATION_PATH, session)
+        
+        logger.info("SERVER STARTUP: Server startup complete (fresh data loaded)!")
+    except Exception as e:
+        logger.error(f"ERROR: Failed to load data: {e}")
+        raise e
+    finally:
+        session.close()
 
 @app.on_event("shutdown")
 def shutdown_event():
@@ -234,22 +263,23 @@ def get_features_vegetation_mapping():
 def get_geojson():
     session = next(get_session())
     try:
-        result = session.execute(text("SELECT id, feature_id, name, l1_code, l1_label, l2_code, l2_label, l3_code, l3_label, geometry FROM features"))
+        result = session.execute(text("SELECT id, feature_id, name, l1_code, l1_label, l2_code, l2_label, l3_code, l3_label, area_hectares, geometry FROM features"))
         features = []
         for row in result:
-            geom = wkt.loads(row.geometry)
+            geom = wkt.loads(row[10])  # geometry is now at index 10
             # geom = geom.simplify(0.1, preserve_topology=True)
             geojson_geom = mapping(geom)
             features.append({
-                "id": row.feature_id,
+                "id": row[1],  # feature_id
                 "properties": {
-                    "name": row.name, 
-                    "L1_code": row.l1_code,
-                    "L1_label": row.l1_label,
-                    "L2_code": row.l2_code,
-                    "L2_label": row.l2_label,
-                    "L3_code": row.l3_code,
-                    "L3_label": row.l3_label
+                    "name": row[2], 
+                    "L1_code": row[3],
+                    "L1_label": row[4],
+                    "L2_code": row[5],
+                    "L2_label": row[6],
+                    "L3_code": row[7],
+                    "L3_label": row[8],
+                    "area_hectares": row[9]
                 },
                 "geometry": geojson_geom
             })
@@ -294,7 +324,7 @@ def get_geojson_viewport(
         
         # DuckDB may not have full spatial functions, so we'll do bounding box filtering in Python
         # First get all features (we'll optimize this with spatial indexing later)
-        query = text("SELECT id, feature_id, name, l1_code, l1_label, l2_code, l2_label, l3_code, l3_label, geometry FROM features")
+        query = text("SELECT id, feature_id, name, l1_code, l1_label, l2_code, l2_label, l3_code, l3_label, area_hectares, geometry FROM features")
         result = session.execute(query)
         
         features = []
@@ -324,7 +354,8 @@ def get_geojson_viewport(
                             "L2_code": row.l2_code,
                             "L2_label": row.l2_label,
                             "L3_code": row.l3_code,
-                            "L3_label": row.l3_label
+                            "L3_label": row.l3_label,
+                            "area_hectares": row.area_hectares
                         },
                         "geometry": geojson_geom
                     })

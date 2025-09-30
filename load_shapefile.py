@@ -62,6 +62,18 @@ def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 100
         logger.info(f"Number of geometries is {len(gdf)}. Selecting random subset of size {subset_size}")
         gdf = gdf.sample(n=subset_size, random_state=None)
 
+    # Calculate areas in hectares for area-based analysis
+    # Convert to a projected CRS for accurate area calculation if needed
+    if gdf.crs and gdf.crs.is_geographic:
+        logger.info("Converting to projected CRS for area calculation")
+        gdf_area = gdf.to_crs('EPSG:3857')  # Web Mercator for area calculation
+        gdf['area_hectares'] = gdf_area.geometry.area / 10000  # Convert m² to hectares
+    else:
+        # Assume the CRS units are already in meters
+        gdf['area_hectares'] = gdf.geometry.area / 10000  # Convert to hectares
+    
+    logger.info(f"Area calculation completed. Sample areas: {gdf['area_hectares'].head().tolist()}")
+
     # Clear existing features
     db_session.query(Feature).delete()
 
@@ -96,6 +108,7 @@ def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 100
             l2_label=str(row.get('L2_label', '')) if row.get('L2_label') else None,
             l3_code=int(row.get('L3_code')) if row.get('L3_code') is not None else None,
             l3_label=str(row.get('L3_label', '')) if row.get('L3_label') else None,
+            area_hectares=float(row.get('area_hectares', 0.0)),
             geometry=geom_2d.wkt
         )
         db_session.add(feature)

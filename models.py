@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String, LargeBinary, Sequence, ForeignKey, Date, Index, UniqueConstraint
+from sqlalchemy import Integer, String, LargeBinary, Sequence, ForeignKey, Date, Index, UniqueConstraint, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base
 
@@ -35,6 +35,7 @@ class Feature(Base):
     l2_label: Mapped[str] = mapped_column(String(100), nullable=True)
     l3_code: Mapped[int] = mapped_column(Integer, nullable=True)
     l3_label: Mapped[str] = mapped_column(String(200), nullable=True)
+    area_hectares: Mapped[float] = mapped_column(Float, nullable=True)  # Area in hectares
     geometry: Mapped[str] = mapped_column(String)
     feature_id_ref = relationship("FeatureIds", foreign_keys=[feature_id])
 
