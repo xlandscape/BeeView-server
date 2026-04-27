@@ -30,6 +30,12 @@ from load_feature_ids import load_feature_ids_to_db
 from load_vegetation_classes import load_vegetation_classes_to_db
 from load_vegetation import load_vegetation_to_db
 from xml_parser import get_beehive_location, get_beehive_buffer_bounds
+from compare import (
+    compute_exceedance,
+    compute_percentiles_pairs,
+    compute_percentiles_relative,
+    compute_relative,
+)
 import pickle
 import logging
 
@@ -1335,6 +1341,100 @@ def get_bee_population_replicates(run_id: int, metric: str | None = None):
                 "replicates": matrix.tolist(),
             }
         return {"run_id": run_id, "metrics": metrics}
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
+# Compare endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/compare/relative")
+def api_compare_relative(baseline_id: int, scenario_id: int, metric: str):
+    """Relative change of metric (scenario - baseline) / baseline per day.
+
+    Pairs replicates by index across the two runs (shorter run wins).
+    Returns mean across pairs plus p10/p50/p90 of the relative change distribution.
+    """
+    session = next(get_session())
+    try:
+        rel = compute_relative(session, baseline_id, scenario_id, metric)
+        if rel is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No data for runs {baseline_id}/{scenario_id} metric '{metric}'",
+            )
+        n_days = rel.shape[1]
+        return {
+            "baseline_id": baseline_id,
+            "scenario_id": scenario_id,
+            "metric": metric,
+            "n_pairs": int(rel.shape[0]),
+            "days": list(range(1, n_days + 1)),
+            "mean": np.nanmean(rel, axis=0).tolist(),
+            **compute_percentiles_relative(rel),
+        }
+    finally:
+        session.close()
+
+
+@app.get("/api/compare/exceedance")
+def api_compare_exceedance(
+    baseline_id: int, scenario_id: int, metric: str, threshold: float = 0.10
+):
+    """Per-day fraction of replicate pairs whose relative change exceeds `threshold`."""
+    session = next(get_session())
+    try:
+        rel = compute_relative(session, baseline_id, scenario_id, metric)
+        if rel is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No data for runs {baseline_id}/{scenario_id} metric '{metric}'",
+            )
+        exc = compute_exceedance(rel, threshold)
+        return {
+            "baseline_id": baseline_id,
+            "scenario_id": scenario_id,
+            "metric": metric,
+            "threshold": threshold,
+            "n_pairs": int(rel.shape[0]),
+            "days": list(range(1, exc.shape[0] + 1)),
+            "exceedance_fraction": exc.tolist(),
+        }
+    finally:
+        session.close()
+
+
+@app.get("/api/compare/percentiles")
+def api_compare_percentiles(
+    baseline_ids: str,
+    scenario_ids: str,
+    metric: str,
+    threshold: float = 0.10,
+):
+    """Spatial (across hives, per day) and temporal (across days, per hive)
+    percentiles of the per-(hive, day) exceedance fraction.
+
+    `baseline_ids` and `scenario_ids` are comma-separated lists of integer
+    run IDs, parallel by index — index i defines one hive's pair.
+    """
+    try:
+        bs = [int(x) for x in baseline_ids.split(",") if x.strip()]
+        ss = [int(x) for x in scenario_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="baseline_ids/scenario_ids must be comma-separated integers"
+        )
+    if len(bs) != len(ss):
+        raise HTTPException(
+            status_code=400, detail="baseline_ids and scenario_ids must have equal length"
+        )
+    session = next(get_session())
+    try:
+        result = compute_percentiles_pairs(session, bs, ss, metric, threshold)
+        result.update({"metric": metric, "threshold": threshold})
+        return result
     finally:
         session.close()
 
