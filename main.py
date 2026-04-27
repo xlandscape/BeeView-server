@@ -10,7 +10,18 @@ from shapely import wkt
 import os
 from sqlalchemy import text
 from database import get_session, engine
-from models import Feature, Nectar, Pollen, BeePopulation, FeatureIds, VegetationClassMapping, Vegetation, Base
+from models import (
+    Base,
+    BeePopulation,
+    BeePopulationReplicate,
+    Feature,
+    FeatureIds,
+    Nectar,
+    Pollen,
+    Run,
+    Vegetation,
+    VegetationClassMapping,
+)
 from load_shapefile import load_shapefile_to_db
 from load_nectar import load_nectar_to_db
 from load_pollen import load_pollen_to_db
@@ -1209,6 +1220,124 @@ def get_exposure_timeseries(feature_ids: str = None):
     except Exception as e:
         logger.error(f"Error calculating exposure timeseries: {e}")
         return {"exposure_timeseries": [], "error": str(e)}
+
+# ---------------------------------------------------------------------------
+# Multi-run endpoints
+# ---------------------------------------------------------------------------
+
+
+def _run_to_dict(run: Run) -> dict:
+    return {
+        "id": run.id,
+        "sim_id": run.sim_id,
+        "label": run.label,
+        "scenario": run.scenario,
+        "hive_group_id": run.hive_group_id,
+        "treatment_on": bool(run.treatment_on),
+        "n_replicates": run.n_replicates,
+        "random_seed": run.random_seed,
+        "hive_x": run.hive_x,
+        "hive_y": run.hive_y,
+        "hive_lon": run.hive_lon,
+        "hive_lat": run.hive_lat,
+        "source_path": run.source_path,
+        "imported_at": run.imported_at.isoformat() if run.imported_at else None,
+    }
+
+
+@app.get("/api/runs")
+def list_runs():
+    """List all imported xPollinator runs, newest first."""
+    session = next(get_session())
+    try:
+        runs = session.query(Run).order_by(Run.imported_at.desc()).all()
+        return {"runs": [_run_to_dict(r) for r in runs]}
+    finally:
+        session.close()
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(run_id: int):
+    """Get a single run by numeric id."""
+    session = next(get_session())
+    try:
+        run = session.query(Run).filter_by(id=run_id).one_or_none()
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+        data = _run_to_dict(run)
+        data["available_metrics"] = [
+            m for (m,) in session.query(BeePopulationReplicate.metric_name)
+            .filter_by(run_id=run_id)
+            .distinct()
+            .all()
+        ]
+        return data
+    finally:
+        session.close()
+
+
+@app.get("/api/bee-population/replicates")
+def get_bee_population_replicates(run_id: int, metric: str | None = None):
+    """Per-replicate colony time series for a run.
+
+    Response shape:
+        {
+          "run_id": X,
+          "metrics": {
+            "<metric_name>": {
+              "replicate_count": N,
+              "days": [1..n_steps],
+              "mean":   [...],   # across replicates per day
+              "p10":    [...],
+              "p50":    [...],
+              "p90":    [...],
+              "min":    [...],
+              "max":    [...],
+              "replicates": [[day1, day2, ...], ...]   # n_replicates x n_days
+            }, ...
+          }
+        }
+
+    If `metric` is provided, only that metric is included.
+    """
+    session = next(get_session())
+    try:
+        if not session.query(Run).filter_by(id=run_id).first():
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+        query = session.query(BeePopulationReplicate).filter_by(run_id=run_id)
+        if metric:
+            query = query.filter_by(metric_name=metric)
+        rows = query.order_by(
+            BeePopulationReplicate.metric_name, BeePopulationReplicate.replicate_idx
+        ).all()
+        if not rows:
+            return {"run_id": run_id, "metrics": {}}
+
+        metrics: dict[str, dict] = {}
+        by_metric: dict[str, list[tuple[int, np.ndarray]]] = {}
+        for row in rows:
+            arr = pickle.loads(row.timeseries)
+            by_metric.setdefault(row.metric_name, []).append((row.replicate_idx, arr))
+
+        for metric_name, replicates in by_metric.items():
+            replicates.sort(key=lambda t: t[0])
+            matrix = np.vstack([arr for _, arr in replicates])  # (n_rep, n_days)
+            n_days = matrix.shape[1]
+            metrics[metric_name] = {
+                "replicate_count": matrix.shape[0],
+                "days": list(range(1, n_days + 1)),
+                "mean": matrix.mean(axis=0).tolist(),
+                "p10": np.percentile(matrix, 10, axis=0).tolist(),
+                "p50": np.percentile(matrix, 50, axis=0).tolist(),
+                "p90": np.percentile(matrix, 90, axis=0).tolist(),
+                "min": matrix.min(axis=0).tolist(),
+                "max": matrix.max(axis=0).tolist(),
+                "replicates": matrix.tolist(),
+            }
+        return {"run_id": run_id, "metrics": metrics}
+    finally:
+        session.close()
+
 
 if __name__ == "__main__":
     import uvicorn
