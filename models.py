@@ -18,12 +18,16 @@ from database import Base
 
 
 class Run(Base):
-    """An xPollinator run imported from a run/<SimID>/ folder."""
+    """An xPollinator run imported from a run/<SimID>/mcs/<MC_ID>/ folder.
+    
+    With multiple outer MC runs per SimID, each MC folder becomes a separate Run record.
+    outer_mc_id and batch_sim_id group them together logically.
+    """
     __tablename__ = "runs"
-    __table_args__ = (UniqueConstraint("sim_id", name="unique_run_sim_id"),)
+    __table_args__ = (UniqueConstraint("batch_sim_id", "outer_mc_id", name="unique_batch_mc"),)
 
     id: Mapped[int] = mapped_column(Integer, Sequence("runs_id_seq"), primary_key=True)
-    sim_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    sim_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     label: Mapped[str] = mapped_column(String(200), nullable=True)
     scenario: Mapped[str] = mapped_column(String(200), nullable=True)
     hive_group_id: Mapped[str] = mapped_column(String(100), nullable=True)
@@ -35,6 +39,10 @@ class Run(Base):
     hive_lon: Mapped[float] = mapped_column(Float, nullable=True)
     hive_lat: Mapped[float] = mapped_column(Float, nullable=True)
     source_path: Mapped[str] = mapped_column(String, nullable=True)
+    sim_start: Mapped[str] = mapped_column(String(20), nullable=True)  # "YYYY-MM-DD" or None
+    batch_sim_id: Mapped[str] = mapped_column(String(200), nullable=True)  # Parent SimID before MC split (e.g., "hive01_treated")
+    outer_mc_id: Mapped[int] = mapped_column(Integer, nullable=True)  # 0, 1, 2... or None for single-MC legacy runs
+    mc_folder_name: Mapped[str] = mapped_column(String(100), nullable=True)  # e.g., "X3ER7MMTRUFYD2S5PB"
     imported_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 

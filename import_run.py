@@ -32,8 +32,8 @@ from xml_parser import transform_coordinates_to_wgs84
 
 logger = logging.getLogger("import_run")
 
-# Metric columns we extract from the BEEHAVE CSV. Order matches experiment.xml <metric> elements.
-METRIC_COLUMNS = [
+# Canonical metrics used by compare UI and charts.
+CANONICAL_METRIC_COLUMNS = [
     "TotalIHbees + TotalForagers + TotalDroneEggs + TotalEggs + TotalDroneLarvae + TotalLarvae + TotalDronePupae + TotalPupae",
     "TotalIHbees + TotalForagers",
     "TotalDroneEggs + TotalEggs",
@@ -42,6 +42,60 @@ METRIC_COLUMNS = [
     "HoneyEnergyStore",
     "PollenStore_g",
 ]
+
+# Raw metrics in newer BEEHAVE output.csv format.
+RAW_METRIC_COLUMNS = [
+    "TotalIHbees",
+    "TotalForagers",
+    "TotalDroneEggs",
+    "TotalEggs",
+    "TotalDroneLarvae",
+    "TotalLarvae",
+    "TotalDronePupae",
+    "TotalPupae",
+]
+
+DERIVED_METRIC_FORMULAS = {
+    "TotalIHbees + TotalForagers + TotalDroneEggs + TotalEggs + TotalDroneLarvae + TotalLarvae + TotalDronePupae + TotalPupae": [
+        "TotalIHbees",
+        "TotalForagers",
+        "TotalDroneEggs",
+        "TotalEggs",
+        "TotalDroneLarvae",
+        "TotalLarvae",
+        "TotalDronePupae",
+        "TotalPupae",
+    ],
+    "TotalIHbees + TotalForagers": ["TotalIHbees", "TotalForagers"],
+    "TotalDroneEggs + TotalEggs": ["TotalDroneEggs", "TotalEggs"],
+    "TotalDroneLarvae + TotalLarvae": ["TotalDroneLarvae", "TotalLarvae"],
+    "TotalDronePupae + TotalPupae": ["TotalDronePupae", "TotalPupae"],
+}
+
+STORED_METRIC_COLUMNS = list(dict.fromkeys(CANONICAL_METRIC_COLUMNS + RAW_METRIC_COLUMNS))
+
+
+def ensure_runs_schema(session) -> None:
+    """Add Phase 2 Run columns when importing into an existing DuckDB database."""
+    try:
+        rows = session.execute(text("PRAGMA table_info('runs')")).fetchall()
+    except Exception:
+        # Table might not exist yet; create_all will handle it.
+        return
+
+    existing_columns = {row[1] for row in rows}
+    missing_ddl = []
+    if "batch_sim_id" not in existing_columns:
+        missing_ddl.append("ALTER TABLE runs ADD COLUMN batch_sim_id VARCHAR")
+    if "outer_mc_id" not in existing_columns:
+        missing_ddl.append("ALTER TABLE runs ADD COLUMN outer_mc_id INTEGER")
+    if "mc_folder_name" not in existing_columns:
+        missing_ddl.append("ALTER TABLE runs ADD COLUMN mc_folder_name VARCHAR")
+
+    for ddl in missing_ddl:
+        session.execute(text(ddl))
+    if missing_ddl:
+        session.commit()
 
 
 def _text(root: ET.Element, tag: str, default: str | None = None) -> str | None:
@@ -67,23 +121,64 @@ def parse_user_xml(user_xml_path: Path) -> dict:
         "n_replicates": int(_text(root, "NumberBeeHaveReplicates", "1") or 1),
         "random_seed": int(_text(root, "BeeHaveRandomSeed", "0") or 0),
         "treatment_on": max_apps > 0,
+        "sim_start": _text(root, "SimulationStart"),
     }
 
 
-def find_output_csv(run_folder: Path) -> Path:
-    """Locate the BEEHAVE output.csv under the MC folder (typically X3*)."""
-    pattern = str(run_folder / "mcs" / "X3*" / "processing" / "BeeHave" / "output.csv")
-    matches = glob.glob(pattern)
-    if not matches:
-        raise FileNotFoundError(f"No BEEHAVE output.csv found under {run_folder}")
-    if len(matches) > 1:
-        logger.warning(f"Multiple output.csv found, using first: {matches[0]}")
-    return Path(matches[0])
+def find_all_mc_folders(run_folder: Path) -> list[Path]:
+    """Locate all BEEHAVE output.csv files under MC folders (X3*).
+    
+    Returns a list of MC folder paths, sorted alphabetically for deterministic ordering.
+    """
+    mcs_dir = run_folder / "mcs"
+    if not mcs_dir.exists():
+        raise FileNotFoundError(f"No mcs/ directory found in {run_folder}")
+    
+    mc_folders = sorted([d for d in mcs_dir.iterdir() if d.is_dir() and d.name.startswith("X3")])
+    if not mc_folders:
+        raise FileNotFoundError(f"No X3* MC folders found under {mcs_dir}")
+    
+    result = []
+    for mc_folder in mc_folders:
+        output_csv = mc_folder / "processing" / "BeeHave" / "output.csv"
+        if output_csv.exists():
+            result.append(mc_folder)
+    
+    if not result:
+        raise FileNotFoundError(f"No output.csv found in any X3* MC folder under {mcs_dir}")
+    
+    return result
 
 
 def _normalize(name: str) -> str:
     """Collapse whitespace so NetLogo's XML-indented metric names match our expected names."""
     return " ".join(name.split())
+
+
+def _extract_metric_array(group_sorted: pd.DataFrame, metric_name: str) -> np.ndarray | None:
+    """Return one metric's timeseries as float64 array from direct or derived columns."""
+    normalized_to_actual = {_normalize(col): col for col in group_sorted.columns}
+    metric_normalized = _normalize(metric_name)
+
+    # Legacy format: metric expression appears directly as a CSV column.
+    direct_col = normalized_to_actual.get(metric_normalized)
+    if direct_col:
+        return group_sorted[direct_col].to_numpy(dtype=np.float64)
+
+    # New format: derive canonical metrics from primitive columns.
+    formula = DERIVED_METRIC_FORMULAS.get(metric_name)
+    if not formula:
+        return None
+
+    missing = [name for name in formula if _normalize(name) not in normalized_to_actual]
+    if missing:
+        return None
+
+    arrays = [
+        group_sorted[normalized_to_actual[_normalize(name)]].to_numpy(dtype=np.float64)
+        for name in formula
+    ]
+    return np.sum(np.vstack(arrays), axis=0)
 
 
 def parse_bee_population_replicates(csv_path: Path) -> dict[tuple[int, str], np.ndarray]:
@@ -99,21 +194,27 @@ def parse_bee_population_replicates(csv_path: Path) -> dict[tuple[int, str], np.
     df.columns = [_normalize(c) for c in df.columns]
     if "[run number]" not in df.columns or "[step]" not in df.columns:
         raise ValueError(f"CSV missing [run number] or [step] columns: {csv_path}")
-    expected = {_normalize(m): m for m in METRIC_COLUMNS}
     result: dict[tuple[int, str], np.ndarray] = {}
     for run_number, group in df.groupby("[run number]"):
         group_sorted = group.sort_values("[step]")
-        for normalized, canonical in expected.items():
-            if normalized not in group_sorted.columns:
-                logger.warning(f"Metric column missing from CSV: {canonical}")
+        for metric_name in STORED_METRIC_COLUMNS:
+            arr = _extract_metric_array(group_sorted, metric_name)
+            if arr is None:
+                # Keep warnings for canonical metrics to make ingest issues visible.
+                if metric_name in CANONICAL_METRIC_COLUMNS:
+                    logger.warning(f"Metric unavailable in CSV: {metric_name}")
                 continue
-            arr = np.nan_to_num(group_sorted[normalized].to_numpy(dtype=np.float64), nan=0.0)
-            result[(int(run_number), canonical)] = arr.astype(np.float32)
+            arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+            result[(int(run_number), metric_name)] = arr.astype(np.float32)
     return result
 
 
-def import_run(run_folder: Path, force: bool = False) -> int:
-    """Import a run folder, return the new Run.id."""
+def import_run(run_folder: Path, force: bool = False) -> list[int]:
+    """Import a run folder with all MC folders, return list of new Run.ids (one per MC).
+    
+    If multiple MC folders exist under mcs/, creates one Run record per MC with
+    outer_mc_id set and sim_id suffixed with _MC<id>.
+    """
     user_xml = run_folder / "user.xml"
     if not user_xml.exists():
         raise FileNotFoundError(f"user.xml not found in {run_folder}")
@@ -121,17 +222,9 @@ def import_run(run_folder: Path, force: bool = False) -> int:
     if not meta["sim_id"]:
         raise ValueError(f"No <SimID> in {user_xml}")
 
-    csv_path = find_output_csv(run_folder)
-    replicates = parse_bee_population_replicates(csv_path)
-    if not replicates:
-        raise ValueError(f"No replicate data parsed from {csv_path}")
-    replicate_indices = sorted({idx for (idx, _) in replicates})
-    n_replicates_actual = len(replicate_indices)
-    if n_replicates_actual != meta["n_replicates"]:
-        logger.warning(
-            f"Replicate count mismatch: user.xml says {meta['n_replicates']}, "
-            f"CSV has {n_replicates_actual}. Using CSV count."
-        )
+    # Find all MC folders
+    mc_folders = find_all_mc_folders(run_folder)
+    logger.info(f"Found {len(mc_folders)} MC folder(s) for {meta['sim_id']}")
 
     wgs84 = transform_coordinates_to_wgs84(meta["hive_x"], meta["hive_y"])
     hive_lon, hive_lat = wgs84 if wgs84 else (None, None)
@@ -139,56 +232,94 @@ def import_run(run_folder: Path, force: bool = False) -> int:
     Base.metadata.create_all(engine)
     session = next(get_session())
     try:
-        existing = session.query(Run).filter_by(sim_id=meta["sim_id"]).one_or_none()
-        if existing:
-            if not force:
+        ensure_runs_schema(session)
+
+        # For --force: delete all runs with same batch_sim_id
+        if force:
+            existing_runs = session.query(Run).filter_by(batch_sim_id=meta["sim_id"]).all()
+            if existing_runs:
+                logger.info(f"--force: deleting {len(existing_runs)} existing run(s) with batch_sim_id={meta['sim_id']}")
+                for run in existing_runs:
+                    session.execute(
+                        text("DELETE FROM bee_population_replicate WHERE run_id = :rid"),
+                        {"rid": run.id},
+                    )
+                    session.commit()
+                    session.execute(text("DELETE FROM runs WHERE id = :rid"), {"rid": run.id})
+                    session.commit()
+
+        imported_run_ids = []
+        for outer_mc_id, mc_folder in enumerate(mc_folders):
+            # Parse replicates from this MC's output.csv
+            csv_path = mc_folder / "processing" / "BeeHave" / "output.csv"
+            try:
+                replicates = parse_bee_population_replicates(csv_path)
+            except Exception as exc:
+                logger.warning(
+                    f"Skipping MC {outer_mc_id} ({mc_folder.name}): failed to parse {csv_path}: {exc}"
+                )
+                continue
+            if not replicates:
+                logger.warning(f"No replicate data in {csv_path}, skipping MC {outer_mc_id}")
+                continue
+            
+            replicate_indices = sorted({idx for (idx, _) in replicates})
+            n_replicates_actual = len(replicate_indices)
+            if n_replicates_actual != meta["n_replicates"]:
+                logger.warning(
+                    f"MC {outer_mc_id} replicate count mismatch: user.xml says {meta['n_replicates']}, "
+                    f"CSV has {n_replicates_actual}. Using CSV count."
+                )
+
+            # Generate unique sim_id for this MC
+            mc_sim_id = f"{meta['sim_id']}_MC{outer_mc_id}"
+
+            # Check if this specific MC already exists
+            existing = session.query(Run).filter_by(sim_id=mc_sim_id).one_or_none()
+            if existing and not force:
                 raise RuntimeError(
-                    f"Run '{meta['sim_id']}' already imported (id={existing.id}); "
+                    f"Run '{mc_sim_id}' already imported (id={existing.id}); "
                     f"use --force to replace."
                 )
-            existing_id = existing.id
-            session.expunge(existing)
-            # DuckDB enforces FKs synchronously; commit the child-table cleanup before the parent.
-            session.execute(
-                text("DELETE FROM bee_population_replicate WHERE run_id = :rid"),
-                {"rid": existing_id},
+
+            run = Run(
+                sim_id=mc_sim_id,
+                label=meta["label"],
+                scenario=meta["scenario"],
+                hive_group_id=meta["hive_group_id"] or meta["sim_id"].replace("_treated", ""),
+                treatment_on=meta["treatment_on"],
+                n_replicates=n_replicates_actual,
+                random_seed=meta["random_seed"],
+                hive_x=meta["hive_x"],
+                hive_y=meta["hive_y"],
+                hive_lon=hive_lon,
+                hive_lat=hive_lat,
+                source_path=str(run_folder.resolve()),
+                sim_start=meta.get("sim_start"),
+                batch_sim_id=meta["sim_id"],  # Parent SimID
+                outer_mc_id=outer_mc_id,  # MC index
+                mc_folder_name=mc_folder.name,  # e.g., "X3ER7MMTRUFYD2S5PB"
             )
-            session.commit()
-            session.execute(text("DELETE FROM runs WHERE id = :rid"), {"rid": existing_id})
-            session.commit()
+            session.add(run)
+            session.flush()
 
-        run = Run(
-            sim_id=meta["sim_id"],
-            label=meta["label"],
-            scenario=meta["scenario"],
-            hive_group_id=meta["hive_group_id"],
-            treatment_on=meta["treatment_on"],
-            n_replicates=n_replicates_actual,
-            random_seed=meta["random_seed"],
-            hive_x=meta["hive_x"],
-            hive_y=meta["hive_y"],
-            hive_lon=hive_lon,
-            hive_lat=hive_lat,
-            source_path=str(run_folder.resolve()),
-        )
-        session.add(run)
-        session.flush()
-
-        for (replicate_idx, metric), arr in replicates.items():
-            session.add(
-                BeePopulationReplicate(
-                    run_id=run.id,
-                    replicate_idx=replicate_idx,
-                    metric_name=metric,
-                    timeseries=pickle.dumps(arr),
+            for (replicate_idx, metric), arr in replicates.items():
+                session.add(
+                    BeePopulationReplicate(
+                        run_id=run.id,
+                        replicate_idx=replicate_idx,
+                        metric_name=metric,
+                        timeseries=pickle.dumps(arr),
+                    )
                 )
+            session.commit()
+            imported_run_ids.append(run.id)
+            logger.info(
+                f"Imported MC {outer_mc_id} for '{meta['sim_id']}' (run_id={run.id}): "
+                f"{n_replicates_actual} replicates x {len(STORED_METRIC_COLUMNS)} configured metrics"
             )
-        session.commit()
-        logger.info(
-            f"Imported run '{run.sim_id}' (id={run.id}): "
-            f"{n_replicates_actual} replicates x {len(METRIC_COLUMNS)} metrics"
-        )
-        return run.id
+
+        return imported_run_ids
     except Exception:
         session.rollback()
         raise
@@ -212,7 +343,8 @@ def main() -> int:
         parser.error(f"Not a directory: {folder}")
 
     try:
-        import_run(folder, force=args.force)
+        run_ids = import_run(folder, force=args.force)
+        logger.info(f"Successfully imported {len(run_ids)} MC run(s): {run_ids}")
         return 0
     except Exception as exc:
         logger.error(f"Import failed: {exc}")
