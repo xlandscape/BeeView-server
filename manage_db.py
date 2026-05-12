@@ -28,19 +28,34 @@ def delete_database_file():
         print("No database file found to delete")
         return False
 
-def start_server():
-    """Start the FastAPI server"""
+def start_server(skip_legacy_loading: bool = False):
+    """Start the FastAPI server.
+
+    Args:
+        skip_legacy_loading: When True the server will create tables but will NOT
+            load data from the legacy files in data/ (arr.dat, lulc.shp, output.csv
+            etc.).  Use this after a database reset so that runs can be imported
+            manually via import_run.py.
+    """
     try:
         print("Starting BeeForage server...")
         print("   Server will be available at: http://localhost:32000")
         print("   API documentation at: http://localhost:32000/docs")
+        if skip_legacy_loading:
+            print("   Data loading: SKIPPED — use 'python import_run.py <run-folder>' to import runs")
         print("   Press Ctrl+C to stop the server")
         print()
-        
+
+        env = os.environ.copy()
+        if skip_legacy_loading:
+            env["SKIP_LEGACY_DATA_LOADING"] = "1"
+        else:
+            env.pop("SKIP_LEGACY_DATA_LOADING", None)
+
         subprocess.run([
-            sys.executable, "-m", "uvicorn", 
+            sys.executable, "-m", "uvicorn",
             "main:app", "--reload", "--port", "32000"
-        ], check=True)
+        ], check=True, env=env)
     except KeyboardInterrupt:
         print("\nServer stopped by user")
     except subprocess.CalledProcessError as e:
@@ -99,15 +114,16 @@ def main():
     
     print()
     print("Options:")
-    print("1. Delete database and reload - Remove existing data and load fresh")
-    print("2. Run server as-is - Use existing database or create if missing")
-    print("3. Show database info - Display detailed database information")
+    print("1. Delete database and start server (empty DB, no data loaded)")
+    print("   Use this to reset and re-import runs via import_run.py")
+    print("2. Start server as-is (use existing DB, or load legacy files if DB is missing)")
+    print("3. Show database info")
     print("4. Exit")
     print()
-    
+
     try:
         choice = input("Choose option (1-4): ").strip()
-        
+
         if choice == "1":
             if db_exists:
                 print(f"\nDeleting database file: {db_file_path}")
@@ -115,37 +131,29 @@ def main():
                 print("Database deleted successfully")
             else:
                 print("\nNo database file to delete")
-            
-            print("\nStarting server (will load fresh data)...")
-            print("   Server will start at: http://localhost:32000")
-            print("   API documentation at: http://localhost:32000/docs")
-            print("   Press Ctrl+C to stop the server\n")
-            
-            start_server()
-            
+
+            print("\nStarting server with empty database (no legacy data will be loaded)...")
+            start_server(skip_legacy_loading=True)
+
         elif choice == "2":
             if db_exists:
                 print("\nStarting server with existing database...")
             else:
-                print("\nStarting server (will create and load fresh database)...")
-            
-            print("   Server will start at: http://localhost:32000")
-            print("   API documentation at: http://localhost:32000/docs")
-            print("   Press Ctrl+C to stop the server\n")
-            
-            start_server()
-            
+                print("\nStarting server (will create database and load legacy data files)...")
+
+            start_server(skip_legacy_loading=False)
+
         elif choice == "3":
             show_database_info()
             input("\nPress Enter to return to menu...")
-            main()  # Return to main menu
-            
+            main()
+
         elif choice == "4":
             print("Goodbye!")
-            
+
         else:
             print("Invalid option")
-            main()  # Return to main menu
+            main()
             
     except KeyboardInterrupt:
         print("\nCancelled by user")
