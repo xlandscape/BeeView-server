@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import h5py
 import json
+import glob
 import numpy as np
 import geopandas as gpd
 from shapely.geometry import shape, mapping, MultiPolygon, Polygon
@@ -10,7 +11,18 @@ from shapely import wkt
 import os
 from sqlalchemy import text
 from database import get_session, engine
-from models import Feature, Nectar, Pollen, BeePopulation, FeatureIds, VegetationClassMapping, Vegetation, Base
+from models import (
+    Base,
+    BeePopulation,
+    BeePopulationReplicate,
+    Feature,
+    FeatureIds,
+    Nectar,
+    Pollen,
+    Run,
+    Vegetation,
+    VegetationClassMapping,
+)
 from load_shapefile import load_shapefile_to_db
 from load_nectar import load_nectar_to_db
 from load_pollen import load_pollen_to_db
@@ -19,6 +31,15 @@ from load_feature_ids import load_feature_ids_to_db
 from load_vegetation_classes import load_vegetation_classes_to_db
 from load_vegetation import load_vegetation_to_db
 from xml_parser import get_beehive_location, get_beehive_buffer_bounds
+from compare import (
+    compute_ed_matrix,
+    compute_exceedance,
+    compute_percentiles_pairs,
+    compute_percentiles_relative,
+    compute_reduction_matrix,
+    compute_relative,
+    compute_survival_probabilities,
+)
 import pickle
 import logging
 
@@ -88,6 +109,13 @@ def startup_event():
     else:
         logger.info("DATABASE: No database found, creating and loading fresh data...")
     
+    # Allow callers (e.g. manage_db.py) to start the server with a blank DB
+    # without triggering the legacy file-based data loading.
+    if os.getenv("SKIP_LEGACY_DATA_LOADING", "").lower() in ("1", "true", "yes"):
+        logger.info("DATA LOADING: Skipped (SKIP_LEGACY_DATA_LOADING is set). Use import_run.py to populate the database.")
+        session.close()
+        return
+
     # Load fresh data
     logger.info("DATA LOADING: Loading fresh data...")
     logger.info(f"Using beehive radius filter: {BEEHIVE_RADIUS_KM}km")
@@ -145,6 +173,8 @@ def api_get_beehive_location():
             return location
         else:
             raise HTTPException(status_code=404, detail="Beehive location not found in template.xrun")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading beehive location: {str(e)}")
 
@@ -1053,7 +1083,7 @@ def get_bee_population_metrics():
         session.close()
 
 @app.get("/api/applications")
-def get_applications(feature_ids: str = None):
+def get_applications(feature_ids: str = None, run_id: int | None = None):
     """
     Get plant protection product application data
     
@@ -1064,52 +1094,39 @@ def get_applications(feature_ids: str = None):
         JSON with applications data
     """
     try:
-        applications_file = "data/applications.txt"
-        if not os.path.exists(applications_file):
-            return {"applications": [], "message": "Applications data file not found"}
-        
-        # Read and parse the applications file
-        applications = []
-        with open(applications_file, 'r') as f:
-            lines = f.readlines()
-        
-        # Skip header line
-        for line in lines[1:]:
-            line = line.strip()
-            if not line:
-                continue
-                
-            parts = line.split(',')
-            if len(parts) >= 5:
-                try:
-                    application = {
-                        "lulc_feature_id": int(parts[0]),
-                        "application_day": int(parts[1]),
-                        "conc_nectar": float(parts[2]),
-                        "conc_pollen": float(parts[3]),
-                        "contact": float(parts[4])
-                    }
-                    applications.append(application)
-                except (ValueError, IndexError) as e:
-                    # Skip malformed lines
-                    continue
-        
-        # Filter by feature IDs if provided
-        if feature_ids:
-            try:
-                feature_id_list = [int(fid.strip()) for fid in feature_ids.split(',')]
-                applications = [app for app in applications if app["lulc_feature_id"] in feature_id_list]
-            except ValueError:
-                return {"error": "Invalid feature_ids parameter"}
-        
-        return {"applications": applications}
-        
+        session = next(get_session())
+        try:
+            applications_file = _resolve_applications_file(session, run_id)
+            if not applications_file:
+                return {"applications": [], "message": "Applications data file not found"}
+
+            applications = _read_applications_file(applications_file)
+            if feature_ids:
+                feature_id_list = _parse_feature_ids(feature_ids)
+                applications = [
+                    app for app in applications if app["lulc_feature_id"] in feature_id_list
+                ]
+            return {
+                "applications": applications,
+                "run_id": run_id,
+                "applications_file": applications_file,
+            }
+        finally:
+            session.close()
+    except HTTPException:
+        raise
+    except ValueError:
+        return {"error": "Invalid feature_ids parameter"}
     except Exception as e:
         logger.error(f"Error reading applications data: {e}")
         return {"applications": [], "error": str(e)}
 
 @app.get("/api/exposure/timeseries")
-def get_exposure_timeseries(feature_ids: str = None):
+def get_exposure_timeseries(
+    feature_ids: str = None,
+    run_id: int | None = None,
+    horizon_days: int | None = None,
+):
     """
     Get exposure time series data for nectar, pollen, and contact values.
     
@@ -1120,95 +1137,531 @@ def get_exposure_timeseries(feature_ids: str = None):
     
     Args:
         feature_ids: Optional comma-separated list of feature IDs to filter by
+        run_id: Optional run id to use run-specific applications file and time horizon
+        horizon_days: Optional explicit horizon override (days)
     
     Returns:
         JSON with exposure time series for nectar, pollen, and contact
     """
     try:
-        # Get applications data using the existing endpoint logic
-        applications_file = "data/applications.txt"
-        if not os.path.exists(applications_file):
-            return {"exposure_timeseries": [], "message": "Applications data file not found"}
-        
-        # Read and parse the applications file
-        applications = []
-        with open(applications_file, 'r') as f:
-            lines = f.readlines()
-        
-        # Skip header line
-        for line in lines[1:]:
-            line = line.strip()
-            if not line:
-                continue
-                
-            parts = line.split(',')
-            if len(parts) >= 5:
-                try:
-                    application = {
-                        "lulc_feature_id": int(parts[0]),
-                        "application_day": int(parts[1]),
-                        "conc_nectar": float(parts[2]),
-                        "conc_pollen": float(parts[3]),
-                        "contact": float(parts[4])
-                    }
-                    applications.append(application)
-                except (ValueError, IndexError) as e:
-                    # Skip malformed lines
-                    continue
-        
-        # Filter by feature IDs if provided
-        if feature_ids:
-            try:
-                feature_id_list = [int(fid.strip()) for fid in feature_ids.split(',')]
-                applications = [app for app in applications if app["lulc_feature_id"] in feature_id_list]
-            except ValueError:
-                return {"error": "Invalid feature_ids parameter"}
-        
-        # Initialize exposure arrays for 365 days
-        exposure_data = {}
-        
-        # Process each application
-        for app in applications:
-            feature_id = app["lulc_feature_id"]
-            start_day = app["application_day"]
-            
-            # Initialize feature if not exists
-            if feature_id not in exposure_data:
-                exposure_data[feature_id] = {
-                    "nectar": [0.0] * 365,
-                    "pollen": [0.0] * 365, 
-                    "contact": [0.0] * 365
-                }
-            
-            # Extend exposure for 9 days starting at application_day
-            for i in range(9):
-                day_index = start_day + i - 1  # Convert to 0-based index
-                if 0 <= day_index < 365:  # Ensure within bounds
-                    exposure_data[feature_id]["nectar"][day_index] += app["conc_nectar"]
-                    exposure_data[feature_id]["pollen"][day_index] += app["conc_pollen"]
-                    exposure_data[feature_id]["contact"][day_index] += app["contact"]
-        
-        # Sum across all selected features for final daily values
-        final_timeseries = []
-        for day in range(1, 366):  # Days 1-365
-            day_index = day - 1
-            
-            nectar_sum = sum(feature_data["nectar"][day_index] for feature_data in exposure_data.values())
-            pollen_sum = sum(feature_data["pollen"][day_index] for feature_data in exposure_data.values())
-            contact_sum = sum(feature_data["contact"][day_index] for feature_data in exposure_data.values())
-            
-            final_timeseries.append({
-                "day": day,
-                "nectar_exposure": nectar_sum,
-                "pollen_exposure": pollen_sum,
-                "contact_exposure": contact_sum
-            })
-        
-        return {"exposure_timeseries": final_timeseries}
-        
+        session = next(get_session())
+        try:
+            applications_file = _resolve_applications_file(session, run_id)
+            if not applications_file:
+                return {"exposure_timeseries": [], "message": "Applications data file not found"}
+
+            applications = _read_applications_file(applications_file)
+            if feature_ids:
+                feature_id_list = _parse_feature_ids(feature_ids)
+                applications = [
+                    app for app in applications if app["lulc_feature_id"] in feature_id_list
+                ]
+
+            days = _resolve_exposure_horizon(session, run_id, applications, horizon_days)
+            final_timeseries = _compute_exposure_timeseries(applications, days)
+            return {
+                "exposure_timeseries": final_timeseries,
+                "horizon_days": days,
+                "run_id": run_id,
+                "applications_file": applications_file,
+            }
+        finally:
+            session.close()
+    except HTTPException:
+        raise
+    except ValueError:
+        return {"error": "Invalid feature_ids parameter"}
     except Exception as e:
         logger.error(f"Error calculating exposure timeseries: {e}")
         return {"exposure_timeseries": [], "error": str(e)}
+
+
+def _parse_feature_ids(feature_ids: str) -> list[int]:
+    return [int(fid.strip()) for fid in feature_ids.split(',') if fid.strip()]
+
+
+def _read_applications_file(applications_file: str) -> list[dict]:
+    applications = []
+    with open(applications_file, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    for line in lines[1:]:
+        line = line.strip()
+        if not line:
+            continue
+
+        parts = line.split(',')
+        if len(parts) < 5:
+            continue
+        try:
+            applications.append(
+                {
+                    "lulc_feature_id": int(parts[0]),
+                    "application_day": int(parts[1]),
+                    "conc_nectar": float(parts[2]),
+                    "conc_pollen": float(parts[3]),
+                    "contact": float(parts[4]),
+                }
+            )
+        except (ValueError, IndexError):
+            continue
+    return applications
+
+
+def _resolve_applications_file(session, run_id: int | None) -> str | None:
+    """Resolve applications file path to the correct MC folder.
+
+    Priority:
+      1. run-scoped applications file from MC-specific folder (when run_id provided)
+      2. default data/applications.txt
+    """
+    if run_id is not None:
+        run = session.query(Run).filter_by(id=run_id).one_or_none()
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+        source_path = run.source_path
+        if source_path:
+            # If MC folder is tracked in metadata, use it directly.
+            if run.mc_folder_name:
+                candidates = [
+                    os.path.join(source_path, "mcs", run.mc_folder_name, "processing", "BeeHave", "applications.txt"),
+                    os.path.join(source_path, "mcs", run.mc_folder_name, "processing", "BeeHaveEcotox", "applications.txt"),
+                    os.path.join(source_path, "mcs", run.mc_folder_name, "BeeHaveEcotox", "applications.txt"),
+                ]
+                for path in candidates:
+                    if os.path.exists(path):
+                        return path
+
+            # Fallback for legacy single-MC runs: search any MC folder.
+            patterns = [
+                os.path.join(source_path, "mcs", "*", "processing", "BeeHave", "applications.txt"),
+                os.path.join(source_path, "mcs", "*", "processing", "BeeHaveEcotox", "applications.txt"),
+                os.path.join(source_path, "mcs", "*", "BeeHaveEcotox", "applications.txt"),
+            ]
+            for pattern in patterns:
+                matches = sorted(glob.glob(pattern))
+                if matches:
+                    return matches[0]
+
+    default_file = "data/applications.txt"
+    if os.path.exists(default_file):
+        return default_file
+    return None
+
+
+def _resolve_exposure_horizon(
+    session,
+    run_id: int | None,
+    applications: list[dict],
+    explicit_horizon: int | None,
+) -> int:
+    if explicit_horizon is not None and explicit_horizon > 0:
+        return explicit_horizon
+
+    if run_id is not None:
+        row = (
+            session.query(BeePopulationReplicate)
+            .filter_by(run_id=run_id)
+            .order_by(BeePopulationReplicate.id)
+            .first()
+        )
+        if row is not None:
+            series = pickle.loads(row.timeseries)
+            return int(len(series))
+
+    if applications:
+        max_app_day = max(app["application_day"] for app in applications)
+        return max(365, max_app_day + 8)
+    return 365
+
+
+def _compute_exposure_timeseries(applications: list[dict], days: int) -> list[dict]:
+    exposure_data = {}
+
+    for app in applications:
+        feature_id = app["lulc_feature_id"]
+        start_day = app["application_day"]
+
+        if feature_id not in exposure_data:
+            exposure_data[feature_id] = {
+                "nectar": [0.0] * days,
+                "pollen": [0.0] * days,
+                "contact": [0.0] * days,
+            }
+
+        for i in range(9):
+            day_index = start_day + i - 1
+            if 0 <= day_index < days:
+                exposure_data[feature_id]["nectar"][day_index] += app["conc_nectar"]
+                exposure_data[feature_id]["pollen"][day_index] += app["conc_pollen"]
+                exposure_data[feature_id]["contact"][day_index] += app["contact"]
+
+    final_timeseries = []
+    for day in range(1, days + 1):
+        day_index = day - 1
+        final_timeseries.append(
+            {
+                "day": day,
+                "nectar_exposure": sum(
+                    feature_data["nectar"][day_index] for feature_data in exposure_data.values()
+                ),
+                "pollen_exposure": sum(
+                    feature_data["pollen"][day_index] for feature_data in exposure_data.values()
+                ),
+                "contact_exposure": sum(
+                    feature_data["contact"][day_index] for feature_data in exposure_data.values()
+                ),
+            }
+        )
+    return final_timeseries
+
+# ---------------------------------------------------------------------------
+# Multi-run endpoints
+# ---------------------------------------------------------------------------
+
+
+def _run_to_dict(run: Run) -> dict:
+    return {
+        "id": run.id,
+        "sim_id": run.sim_id,
+        "label": run.label,
+        "scenario": run.scenario,
+        "hive_group_id": run.hive_group_id,
+        "batch_sim_id": getattr(run, "batch_sim_id", None),
+        "outer_mc_id": getattr(run, "outer_mc_id", None),
+        "mc_folder_name": getattr(run, "mc_folder_name", None),
+        "treatment_on": bool(run.treatment_on),
+        "n_replicates": run.n_replicates,
+        "random_seed": run.random_seed,
+        "hive_x": run.hive_x,
+        "hive_y": run.hive_y,
+        "hive_lon": run.hive_lon,
+        "hive_lat": run.hive_lat,
+        "source_path": run.source_path,
+        "sim_start": getattr(run, "sim_start", None),
+        "imported_at": run.imported_at.isoformat() if run.imported_at else None,
+    }
+
+
+@app.get("/api/runs")
+def list_runs():
+    """List all imported xPollinator runs, newest first."""
+    session = next(get_session())
+    try:
+        runs = session.query(Run).order_by(Run.imported_at.desc()).all()
+        return {"runs": [_run_to_dict(r) for r in runs]}
+    finally:
+        session.close()
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(run_id: int):
+    """Get a single run by numeric id."""
+    session = next(get_session())
+    try:
+        run = session.query(Run).filter_by(id=run_id).one_or_none()
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+        data = _run_to_dict(run)
+        data["available_metrics"] = [
+            m for (m,) in session.query(BeePopulationReplicate.metric_name)
+            .filter_by(run_id=run_id)
+            .distinct()
+            .all()
+        ]
+        return data
+    finally:
+        session.close()
+
+
+@app.get("/api/bee-population/replicates")
+def get_bee_population_replicates(run_id: int, metric: str | None = None):
+    """Per-replicate colony time series for a run.
+
+    Response shape:
+        {
+          "run_id": X,
+          "metrics": {
+            "<metric_name>": {
+              "replicate_count": N,
+              "days": [1..n_steps],
+              "mean":   [...],   # across replicates per day
+              "p10":    [...],
+              "p50":    [...],
+              "p90":    [...],
+              "min":    [...],
+              "max":    [...],
+              "replicates": [[day1, day2, ...], ...]   # n_replicates x n_days
+            }, ...
+          }
+        }
+
+    If `metric` is provided, only that metric is included.
+    """
+    session = next(get_session())
+    try:
+        if not session.query(Run).filter_by(id=run_id).first():
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+        query = session.query(BeePopulationReplicate).filter_by(run_id=run_id)
+        if metric:
+            query = query.filter_by(metric_name=metric)
+        rows = query.order_by(
+            BeePopulationReplicate.metric_name, BeePopulationReplicate.replicate_idx
+        ).all()
+        if not rows:
+            return {"run_id": run_id, "metrics": {}}
+
+        metrics: dict[str, dict] = {}
+        by_metric: dict[str, list[tuple[int, np.ndarray]]] = {}
+        for row in rows:
+            arr = pickle.loads(row.timeseries)
+            by_metric.setdefault(row.metric_name, []).append((row.replicate_idx, arr))
+
+        for metric_name, replicates in by_metric.items():
+            replicates.sort(key=lambda t: t[0])
+            matrix = np.vstack([arr for _, arr in replicates])  # (n_rep, n_days)
+            n_days = matrix.shape[1]
+            metrics[metric_name] = {
+                "replicate_count": matrix.shape[0],
+                "days": list(range(1, n_days + 1)),
+                "mean": matrix.mean(axis=0).tolist(),
+                "p10": np.percentile(matrix, 10, axis=0).tolist(),
+                "p50": np.percentile(matrix, 50, axis=0).tolist(),
+                "p90": np.percentile(matrix, 90, axis=0).tolist(),
+                "min": matrix.min(axis=0).tolist(),
+                "max": matrix.max(axis=0).tolist(),
+                "replicates": matrix.tolist(),
+            }
+        return {"run_id": run_id, "metrics": metrics}
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
+# Compare endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/compare/relative")
+def api_compare_relative(baseline_id: int, scenario_id: int, metric: str):
+    """Relative change of metric (scenario - baseline) / baseline per day.
+
+    Pairs replicates by index across the two runs (shorter run wins).
+    Returns mean across pairs plus p10/p50/p90 of the relative change distribution.
+    """
+    session = next(get_session())
+    try:
+        rel = compute_relative(session, baseline_id, scenario_id, metric)
+        if rel is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No data for runs {baseline_id}/{scenario_id} metric '{metric}'",
+            )
+        n_days = rel.shape[1]
+        return {
+            "baseline_id": baseline_id,
+            "scenario_id": scenario_id,
+            "metric": metric,
+            "n_pairs": int(rel.shape[0]),
+            "days": list(range(1, n_days + 1)),
+            "mean": np.nanmean(rel, axis=0).tolist(),
+            **compute_percentiles_relative(rel),
+        }
+    finally:
+        session.close()
+
+
+@app.get("/api/compare/exceedance")
+def api_compare_exceedance(
+    baseline_id: int,
+    scenario_id: int,
+    metric: str,
+    threshold: float = 0.10,
+    mode: str = "decline",
+):
+    """Per-day fraction of replicate pairs exceeding threshold in selected mode.
+
+    Modes:
+      - decline: rel <= -threshold
+      - absolute: |rel| > threshold
+    """
+    if mode not in {"decline", "absolute"}:
+        raise HTTPException(status_code=400, detail="mode must be 'decline' or 'absolute'")
+    session = next(get_session())
+    try:
+        rel = compute_relative(session, baseline_id, scenario_id, metric)
+        if rel is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No data for runs {baseline_id}/{scenario_id} metric '{metric}'",
+            )
+        exc = compute_exceedance(rel, threshold, mode)
+        return {
+            "baseline_id": baseline_id,
+            "scenario_id": scenario_id,
+            "metric": metric,
+            "threshold": threshold,
+            "mode": mode,
+            "n_pairs": int(rel.shape[0]),
+            "days": list(range(1, exc.shape[0] + 1)),
+            "exceedance_fraction": exc.tolist(),
+        }
+    finally:
+        session.close()
+
+
+@app.get("/api/compare/percentiles")
+def api_compare_percentiles(
+    baseline_ids: str,
+    scenario_ids: str,
+    metric: str,
+    threshold: float = 0.10,
+    mode: str = "decline",
+    spatial_scope: str = "pair",
+):
+    """Spatial (across hives, per day) and temporal (across days, per hive)
+    percentiles of the per-(hive, day) exceedance fraction.
+
+    `baseline_ids` and `scenario_ids` are comma-separated lists of integer
+    run IDs, parallel by index — index i defines one hive's pair.
+    """
+    try:
+        bs = [int(x) for x in baseline_ids.split(",") if x.strip()]
+        ss = [int(x) for x in scenario_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="baseline_ids/scenario_ids must be comma-separated integers"
+        )
+    if len(bs) != len(ss):
+        raise HTTPException(
+            status_code=400, detail="baseline_ids and scenario_ids must have equal length"
+        )
+    if mode not in {"decline", "absolute"}:
+        raise HTTPException(status_code=400, detail="mode must be 'decline' or 'absolute'")
+    if spatial_scope not in {"pair", "hive_mean"}:
+        raise HTTPException(status_code=400, detail="spatial_scope must be 'pair' or 'hive_mean'")
+    session = next(get_session())
+    try:
+        result = compute_percentiles_pairs(
+            session,
+            bs,
+            ss,
+            metric,
+            threshold,
+            mode,
+            spatial_scope=spatial_scope,
+        )
+        result.update({
+            "metric": metric,
+            "threshold": threshold,
+            "mode": mode,
+            "spatial_scope": spatial_scope,
+        })
+        return result
+    finally:
+        session.close()
+
+
+@app.get("/api/compare/reduction-matrix")
+def api_compare_reduction_matrix(
+    baseline_ids: str,
+    scenario_ids: str,
+    metric: str,
+    spatial_scope: str = "pair",
+):
+    """Percent-reduction percentile matrix.
+
+    Each cell (pS, pT) = actual percent-reduction of treated vs untreated
+    at the pS-th spatial percentile and pT-th temporal percentile.
+    No threshold parameter — the cell value IS the reduction magnitude.
+    """
+    try:
+        bs = [int(x) for x in baseline_ids.split(",") if x.strip()]
+        ss = [int(x) for x in scenario_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="baseline_ids/scenario_ids must be comma-separated integers"
+        )
+    if len(bs) != len(ss):
+        raise HTTPException(
+            status_code=400, detail="baseline_ids and scenario_ids must have equal length"
+        )
+    if spatial_scope not in {"pair", "hive_mean"}:
+        raise HTTPException(status_code=400, detail="spatial_scope must be 'pair' or 'hive_mean'")
+    session = next(get_session())
+    try:
+        return compute_reduction_matrix(session, bs, ss, metric, spatial_scope=spatial_scope)
+    finally:
+        session.close()
+
+
+@app.get("/api/compare/ed-matrix")
+def api_compare_ed_matrix(
+    baseline_ids: str,
+    scenario_ids: str,
+    metric: str,
+    threshold: float = 0.10,
+):
+    """Effect-Days (ED) percentile matrix.
+
+    For each replicate at each hive location, counts the number of days where
+    the scenario metric falls below baseline * (1 - threshold).  Returns a 10x10
+    matrix: rows = temporal percentiles (p10..p100 across replicates),
+    cols = spatial percentiles (p10..p100 across hive locations).
+
+    `baseline_ids` and `scenario_ids` are comma-separated integer run IDs,
+    parallel by index — index i defines one hive location's paired runs.
+    """
+    try:
+        bs = [int(x) for x in baseline_ids.split(",") if x.strip()]
+        ss = [int(x) for x in scenario_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="baseline_ids/scenario_ids must be comma-separated integers"
+        )
+    if len(bs) != len(ss):
+        raise HTTPException(
+            status_code=400, detail="baseline_ids and scenario_ids must have equal length"
+        )
+    session = next(get_session())
+    try:
+        return compute_ed_matrix(session, bs, ss, metric, threshold)
+    finally:
+        session.close()
+
+
+@app.get("/api/compare/survival")
+def api_compare_survival(
+    baseline_ids: str,
+    scenario_ids: str,
+):
+    """Overwintering survival probability per hive location.
+
+    For each paired (baseline, scenario) run, computes the fraction of
+    replicates where adult bees (TotalIHbees + TotalForagers) on the last
+    simulation day >= 4000 (CRITICAL_COLONY_SIZE_WINTER).
+
+    Returns survival probabilities and absolute effect per hive.
+    `baseline_ids` and `scenario_ids` are comma-separated integer run IDs.
+    """
+    try:
+        bs = [int(x) for x in baseline_ids.split(",") if x.strip()]
+        ss = [int(x) for x in scenario_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="baseline_ids/scenario_ids must be comma-separated integers"
+        )
+    if len(bs) != len(ss):
+        raise HTTPException(
+            status_code=400, detail="baseline_ids and scenario_ids must have equal length"
+        )
+    session = next(get_session())
+    try:
+        return compute_survival_probabilities(session, bs, ss)
+    finally:
+        session.close()
+
 
 if __name__ == "__main__":
     import uvicorn

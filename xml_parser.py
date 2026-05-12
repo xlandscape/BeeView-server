@@ -2,10 +2,42 @@
 XML parser utilities for BeeForage configuration files.
 """
 import xml.etree.ElementTree as ET
+import os
 from pathlib import Path
 from typing import Optional, Tuple
 import geopandas as gpd
 from shapely.geometry import Point
+
+
+DEFAULT_TEMPLATE_PATH = "../xPollinator/template.xrun"
+
+
+def resolve_template_xrun_path(template_path: str = DEFAULT_TEMPLATE_PATH) -> Path:
+    """Resolve the BeeHave template path against the current repo layout."""
+    candidate = Path(template_path)
+    if candidate.is_absolute() and candidate.exists():
+        return candidate
+
+    server_dir = Path(__file__).resolve().parent
+    env_path = os.getenv("BEEHIVE_TEMPLATE_PATH")
+    candidate_paths = []
+
+    if env_path:
+        candidate_paths.append(Path(env_path))
+
+    candidate_paths.extend([
+        server_dir / template_path,
+        server_dir / "../xPollinator/template.xrun",
+        server_dir / "../template.xrun",
+        Path.cwd() / template_path,
+    ])
+
+    for path in candidate_paths:
+        resolved = path.resolve()
+        if resolved.exists():
+            return resolved
+
+    return (server_dir / template_path).resolve()
 
 
 def parse_template_xrun(file_path: str) -> Optional[Tuple[float, float]]:
@@ -66,14 +98,14 @@ def transform_coordinates_to_wgs84(x: float, y: float, source_crs: str = None) -
     try:
         # If no source CRS provided, try to read from shapefile
         if source_crs is None:
-            shapefile_path = Path(__file__).parent / "data" / "Tarn_LULC_v04.shp"
+            shapefile_path = Path(__file__).parent / "data" / "lulc.shp"
             if shapefile_path.exists():
                 gdf = gpd.read_file(str(shapefile_path))
                 source_crs = gdf.crs
                 print(f"Detected CRS from shapefile: {source_crs}")
             else:
-                # Default to a common UTM zone for France (UTM Zone 31N)
-                source_crs = "EPSG:32631"
+                # Default to Web Mercator (EPSG:3857) which matches the BeeView-server data pipeline
+                source_crs = "EPSG:3857"
                 print(f"Shapefile not found, assuming CRS: {source_crs}")
         
         # Create a point in the source CRS
@@ -91,7 +123,7 @@ def transform_coordinates_to_wgs84(x: float, y: float, source_crs: str = None) -
         return None
 
 
-def get_beehive_location(template_path: str = "../../template.xrun") -> Optional[dict]:
+def get_beehive_location(template_path: str = DEFAULT_TEMPLATE_PATH) -> Optional[dict]:
     """
     Get beehive location from template.xrun file and transform to WGS84.
     
@@ -101,9 +133,7 @@ def get_beehive_location(template_path: str = "../../template.xrun") -> Optional
     Returns:
         Dictionary with x, y coordinates in WGS84 and metadata, or None if not found
     """
-    # Get absolute path to template.xrun
-    server_dir = Path(__file__).parent
-    full_path = server_dir / template_path
+    full_path = resolve_template_xrun_path(template_path)
     
     coordinates = parse_template_xrun(str(full_path))
     
@@ -138,7 +168,7 @@ def get_beehive_location(template_path: str = "../../template.xrun") -> Optional
     return None
 
 
-def create_beehive_buffer(radius_km: float = 10.0, template_path: str = "../../template.xrun") -> Optional[gpd.GeoDataFrame]:
+def create_beehive_buffer(radius_km: float = 10.0, template_path: str = DEFAULT_TEMPLATE_PATH) -> Optional[gpd.GeoDataFrame]:
     """
     Create a buffer around the beehive location for filtering geometries.
     
@@ -151,8 +181,7 @@ def create_beehive_buffer(radius_km: float = 10.0, template_path: str = "../../t
     """
     try:
         # Get beehive location in projected coordinates
-        server_dir = Path(__file__).parent
-        full_path = server_dir / template_path
+        full_path = resolve_template_xrun_path(template_path)
         coordinates = parse_template_xrun(str(full_path))
         
         if not coordinates:
@@ -186,7 +215,7 @@ def create_beehive_buffer(radius_km: float = 10.0, template_path: str = "../../t
         return None
 
 
-def get_beehive_buffer_bounds(radius_km: float = 10.0, template_path: str = "../../template.xrun") -> Optional[dict]:
+def get_beehive_buffer_bounds(radius_km: float = 10.0, template_path: str = DEFAULT_TEMPLATE_PATH) -> Optional[dict]:
     """
     Get the bounding box of the beehive buffer area.
     

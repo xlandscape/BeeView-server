@@ -1,0 +1,28 @@
+site_name: BeeView-server Documentation
+site_description: FastAPI backend for loading and serving xPollinator simulation data
+theme:
+  name: material
+  palette:
+    primary: teal
+    accent: amber
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.tabs.link
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Data Requirements: data-requirements.md
+  - Importing Runs: importing-runs.md
+  - Batch Processing: batch-processing.md
+  - Database Management: database.md
+  - API Reference: api-reference.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - attr_list
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true

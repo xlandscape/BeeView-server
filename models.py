@@ -1,6 +1,68 @@
-from sqlalchemy import Integer, String, LargeBinary, Sequence, ForeignKey, Date, Index, UniqueConstraint, Float
+from datetime import datetime
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    Sequence,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from database import Base
+
+
+class Run(Base):
+    """An xPollinator run imported from a run/<SimID>/mcs/<MC_ID>/ folder.
+    
+    With multiple outer MC runs per SimID, each MC folder becomes a separate Run record.
+    outer_mc_id and batch_sim_id group them together logically.
+    """
+    __tablename__ = "runs"
+    __table_args__ = (UniqueConstraint("batch_sim_id", "outer_mc_id", name="unique_batch_mc"),)
+
+    id: Mapped[int] = mapped_column(Integer, Sequence("runs_id_seq"), primary_key=True)
+    sim_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    label: Mapped[str] = mapped_column(String(200), nullable=True)
+    scenario: Mapped[str] = mapped_column(String(200), nullable=True)
+    hive_group_id: Mapped[str] = mapped_column(String(100), nullable=True)
+    treatment_on: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    n_replicates: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    random_seed: Mapped[int] = mapped_column(Integer, nullable=True)
+    hive_x: Mapped[float] = mapped_column(Float, nullable=True)
+    hive_y: Mapped[float] = mapped_column(Float, nullable=True)
+    hive_lon: Mapped[float] = mapped_column(Float, nullable=True)
+    hive_lat: Mapped[float] = mapped_column(Float, nullable=True)
+    source_path: Mapped[str] = mapped_column(String, nullable=True)
+    sim_start: Mapped[str] = mapped_column(String(20), nullable=True)  # "YYYY-MM-DD" or None
+    batch_sim_id: Mapped[str] = mapped_column(String(200), nullable=True)  # Parent SimID before MC split (e.g., "hive01_treated")
+    outer_mc_id: Mapped[int] = mapped_column(Integer, nullable=True)  # 0, 1, 2... or None for single-MC legacy runs
+    mc_folder_name: Mapped[str] = mapped_column(String(100), nullable=True)  # e.g., "X3ER7MMTRUFYD2S5PB"
+    imported_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BeePopulationReplicate(Base):
+    """A single BEEHAVE replicate's time series for one metric, owned by a Run."""
+    __tablename__ = "bee_population_replicate"
+    __table_args__ = (
+        Index("ix_bee_pop_replicate_run_metric", "run_id", "metric_name"),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer, Sequence("bee_population_replicate_id_seq"), primary_key=True
+    )
+    run_id: Mapped[int] = mapped_column(Integer, ForeignKey("runs.id"), nullable=False)
+    replicate_idx: Mapped[int] = mapped_column(Integer, nullable=False)
+    metric_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    timeseries: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+    run = relationship("Run")
+
 
 class FeatureIds(Base):
     __tablename__ = "feature_ids"
