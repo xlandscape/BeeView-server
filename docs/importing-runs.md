@@ -100,6 +100,86 @@ A run is flagged as **treated** (`treatment_on = true`) when `<MaxNumberApplicat
 
 The hive coordinates in user.xml are in a **projected CRS** (typically EPSG:32631 for UTM Zone 31N). The importer automatically transforms them to **WGS84** (longitude/latitude) using `xml_parser.transform_coordinates_to_wgs84()` and stores both the original projected and WGS84 coordinates.
 
+## Batch importing: `import_all_experiments.py`
+
+For typical xPollinator workflows with multiple hives, treatments, and Monte Carlo landscape realisations, use `import_all_experiments.py` to import everything in one command.
+
+### Prerequisites
+
+Place experiment folders in the `experiments/` directory. Each folder must follow the naming convention:
+
+```
+experiments/
+├── exp1_TaG_hive36_mc00__a1b2c3d4/
+│   ├── user.xml
+│   └── mcs/X3.../processing/BeeHave/output.csv
+├── exp4_TaG_hive36_mc00__e5f6g7h8/
+│   ├── user.xml
+│   └── mcs/X3.../processing/BeeHave/
+│       ├── output.csv
+│       └── applications.txt          ← treated runs have this file
+├── exp1_TaG_hive36_mc01__i9j0k1l2/
+│   ...
+└── ...
+```
+
+Naming pattern: `exp{N}_{scenario}_hive{HH}_mc{MM}__{uuid}`
+
+- `exp1` = untreated, `exp4` = treated (determined by `<MaxNumberApplications>` in user.xml)
+- `hive{HH}` = hive location identifier
+- `mc{MM}` = Monte Carlo landscape index
+- `__{uuid}` = unique run identifier (ignored by the importer)
+
+### Usage
+
+```bash
+# Clean import (wipe DB, reimport everything)
+python import_all_experiments.py --clean
+
+# Force-replace individual runs that already exist
+python import_all_experiments.py --force
+
+# Verbose logging
+python import_all_experiments.py --clean -v
+```
+
+### How it works
+
+1. Scans `experiments/` for folders matching the naming pattern
+2. Groups folders by (hive, scenario, treatment)
+3. For each folder, calls the same import logic as `import_run.py`
+4. Generates clean `sim_id` values like `hive36_treated_MC0`, `hive36_untreated_MC1`
+5. Stores run metadata and bee population replicates in DuckDB
+6. Parses `applications.txt` and stores application rows in DuckDB (`applications` table)
+
+### Output
+
+After importing 5 hives × 2 treatments × 10 MC runs = 100 database records:
+
+```
+$ python import_all_experiments.py --clean
+Cleaned database: deleted all existing runs
+Found 100 experiment folders in experiments/
+Grouped into 10 batches (hive × treatment):
+  hive36_treated   — 10 MC runs
+  hive36_untreated — 10 MC runs
+  hive37_treated   — 10 MC runs
+  ...
+Imported 100 runs successfully.
+```
+
+### Applications resolution
+
+When `import_all_experiments.py` runs, treated-run application rows are imported into the database.
+
+At runtime, API queries use DB rows first. Legacy fallback still supports file lookup from:
+
+```
+source_path/mcs/<mc_folder_name>/processing/BeeHave/applications.txt
+```
+
+This means deployed systems can run from `data/beeview.duckdb` without shipping the full `experiments/` tree.
+
 ## Troubleshooting
 
 | Problem | Cause | Fix |
@@ -109,3 +189,5 @@ The hive coordinates in user.xml are in a **projected CRS** (typically EPSG:3263
 | `Run already imported` | Duplicate SimID | Use `--force` to replace, or delete existing runs first |
 | `Metric unavailable in CSV` | Old BEEHAVE format | Warning only — derived metrics are computed from raw columns when available |
 | `replicate count mismatch` | user.xml disagrees with CSV | Warning only — actual CSV count is used |
+| No applications on map | Treated run not selected | Select a treated run via View chips — applications are resolved per-run |
+| `applications.txt not found` | Missing from experiment folder | Ensure `mcs/<MC>/processing/BeeHave/applications.txt` exists in treated experiment folders |

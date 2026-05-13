@@ -88,7 +88,7 @@ Returns pesticide application events for a run.
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `run_id` | int | Run ID (uses the run's MC folder to find its `applications.txt`) |
+| `run_id` | int | Run ID (reads from `applications` table; falls back to legacy file lookup if DB rows are missing) |
 | `feature_ids` | string | Comma-separated feature IDs to filter by |
 
 ### `GET /api/exposure/timeseries`
@@ -103,6 +103,11 @@ Returns daily exposure time series computed from application events.
 | `feature_ids` | string | Comma-separated feature IDs |
 
 Each application event is extended over 9 days (application day + 8 following days). Overlapping applications are summed.
+
+Source priority for applications data:
+
+1. `applications` table rows for the requested `run_id`
+2. Legacy fallback (`source_path/.../applications.txt` or `data/applications.txt`)
 
 ## Compare endpoints
 

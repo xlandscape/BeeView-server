@@ -23,7 +23,11 @@ These files describe the landscape and are loaded once when the server starts fo
 | File | Source | Content |
 |------|--------|---------|
 | `output.csv` | `run/<SimID>/mcs/<MC_ID>/processing/BeeHave/output.csv` | Legacy single-run BEEHAVE output (only needed if not using `import_run.py`) |
-| `applications.txt` | `run/<SimID>/mcs/<MC_ID>/processing/BeeHave/applications.txt` | Pesticide application events (feature ID, day, concentrations) |
+
+!!! note
+    `applications.txt` does **not** need to be placed in `data/`. Batch import stores application events in DuckDB (`applications` table). Runtime reads from DB first; legacy file fallback (`source_path/.../applications.txt` or `data/applications.txt`) exists for backward compatibility.
+
+    For deployment, this means you can distribute `data/beeview.duckdb` directly and do not need to ship `experiments/`.
 
 ### HDF5 data paths in `arr.dat`
 

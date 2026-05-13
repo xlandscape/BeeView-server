@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import h5py
 import json
 import glob
@@ -12,6 +13,7 @@ import os
 from sqlalchemy import text
 from database import get_session, engine
 from models import (
+    Application,
     Base,
     BeePopulation,
     BeePopulationReplicate,
@@ -1085,22 +1087,15 @@ def get_bee_population_metrics():
 @app.get("/api/applications")
 def get_applications(feature_ids: str = None, run_id: int | None = None):
     """
-    Get plant protection product application data
-    
-    Args:
-        feature_ids: Optional comma-separated list of feature IDs to filter by
-    
-    Returns:
-        JSON with applications data
+    Get plant protection product application data.
+
+    Reads from the applications table (populated at import time).
+    Falls back to file-based resolution for legacy setups.
     """
     try:
         session = next(get_session())
         try:
-            applications_file = _resolve_applications_file(session, run_id)
-            if not applications_file:
-                return {"applications": [], "message": "Applications data file not found"}
-
-            applications = _read_applications_file(applications_file)
+            applications = _load_applications(session, run_id)
             if feature_ids:
                 feature_id_list = _parse_feature_ids(feature_ids)
                 applications = [
@@ -1109,7 +1104,6 @@ def get_applications(feature_ids: str = None, run_id: int | None = None):
             return {
                 "applications": applications,
                 "run_id": run_id,
-                "applications_file": applications_file,
             }
         finally:
             session.close()
@@ -1146,11 +1140,7 @@ def get_exposure_timeseries(
     try:
         session = next(get_session())
         try:
-            applications_file = _resolve_applications_file(session, run_id)
-            if not applications_file:
-                return {"exposure_timeseries": [], "message": "Applications data file not found"}
-
-            applications = _read_applications_file(applications_file)
+            applications = _load_applications(session, run_id)
             if feature_ids:
                 feature_id_list = _parse_feature_ids(feature_ids)
                 applications = [
@@ -1163,7 +1153,6 @@ def get_exposure_timeseries(
                 "exposure_timeseries": final_timeseries,
                 "horizon_days": days,
                 "run_id": run_id,
-                "applications_file": applications_file,
             }
         finally:
             session.close()
@@ -1178,6 +1167,34 @@ def get_exposure_timeseries(
 
 def _parse_feature_ids(feature_ids: str) -> list[int]:
     return [int(fid.strip()) for fid in feature_ids.split(',') if fid.strip()]
+
+
+def _load_applications(session, run_id: int | None) -> list[dict]:
+    """Load applications from DB (preferred) or fall back to file resolution.
+
+    Returns a list of dicts with keys: lulc_feature_id, application_day,
+    conc_nectar, conc_pollen, contact.
+    """
+    if run_id is not None:
+        # Try DB first
+        rows = session.query(Application).filter_by(run_id=run_id).all()
+        if rows:
+            return [
+                {
+                    "lulc_feature_id": r.lulc_feature_id,
+                    "application_day": r.application_day,
+                    "conc_nectar": r.conc_nectar,
+                    "conc_pollen": r.conc_pollen,
+                    "contact": r.contact,
+                }
+                for r in rows
+            ]
+
+    # Fall back to file-based resolution (legacy / data/applications.txt)
+    app_file = _resolve_applications_file(session, run_id)
+    if app_file:
+        return _read_applications_file(app_file)
+    return []
 
 
 def _read_applications_file(applications_file: str) -> list[dict]:
@@ -1214,6 +1231,9 @@ def _resolve_applications_file(session, run_id: int | None) -> str | None:
     Priority:
       1. run-scoped applications file from MC-specific folder (when run_id provided)
       2. default data/applications.txt
+
+    source_path may be relative (portable DB) or absolute (legacy).
+    Relative paths are resolved against CWD.
     """
     if run_id is not None:
         run = session.query(Run).filter_by(id=run_id).one_or_none()
@@ -1221,6 +1241,9 @@ def _resolve_applications_file(session, run_id: int | None) -> str | None:
             raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
 
         source_path = run.source_path
+        # Resolve relative paths against CWD for portability
+        if source_path and not os.path.isabs(source_path):
+            source_path = os.path.join(os.getcwd(), source_path)
         if source_path:
             # If MC folder is tracked in metadata, use it directly.
             if run.mc_folder_name:
@@ -1661,6 +1684,24 @@ def api_compare_survival(
         return compute_survival_probabilities(session, bs, ss)
     finally:
         session.close()
+
+
+# ---------------------------------------------------------------------------
+# Serve built frontend (BeeView dist/) if the folder exists.
+# Must be mounted AFTER all /api routes so API takes priority.
+# ---------------------------------------------------------------------------
+FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "frontend")
+if os.path.isdir(FRONTEND_DIR) and os.path.isfile(os.path.join(FRONTEND_DIR, "index.html")):
+    # Serve static assets (js, css, images)
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIR, "assets")), name="frontend-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        """SPA catch-all: serve file if it exists, otherwise index.html."""
+        file_path = os.path.join(FRONTEND_DIR, full_path)
+        if full_path and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ theme:
 nav:
   - Home: index.md
   - Installation: installation.md
+  - Deployment: deployment.md
   - Data Requirements: data-requirements.md
   - Importing Runs: importing-runs.md
   - Batch Processing: batch-processing.md

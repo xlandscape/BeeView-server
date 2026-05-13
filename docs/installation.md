@@ -1,5 +1,7 @@
 # Installation
 
+For deployment workflows (portable Windows bundle and Linux service setup), see [Deployment](deployment.md).
+
 ## Prerequisites
 
 - **Python 3.10+** (tested with 3.11)
@@ -87,12 +89,35 @@ python -m uvicorn main:app --reload --port 32000
 
 Useful during development — the server restarts automatically when Python files change.
 
+## Frontend serving modes
+
+BeeView-server can serve the frontend directly from `frontend/` if that folder contains a built BeeView app (`index.html` + `assets/`).
+
+- If `frontend/` exists, open BeeView at [http://localhost:32000](http://localhost:32000)
+- If `frontend/` is missing, use BeeView dev server separately and call API on port `32000`
+
+To populate `frontend/` from BeeView build output:
+
+```bash
+cd ../BeeView
+npm run build
+cd ../BeeView-server
+cp -r ../BeeView/dist frontend
+```
+
+On Windows, you can use:
+
+```bat
+xcopy /s /e /i ..\BeeView\dist frontend
+```
+
 ## Verifying the installation
 
 Once the server is running, open:
 
 - **API docs**: [http://localhost:32000/docs](http://localhost:32000/docs) — interactive Swagger UI
 - **Health check**: [http://localhost:32000/api/features/all](http://localhost:32000/api/features/all) — should return a list of feature IDs
+- **Frontend root**: [http://localhost:32000](http://localhost:32000) — should load BeeView when `frontend/` is present
 
 ## Environment variables
 

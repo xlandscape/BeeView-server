@@ -6,7 +6,7 @@ This is the backend server for the BeeView application, built with FastAPI.
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.10 or higher (tested with 3.11)
 - pip (Python package installer)
 
 ### Installation
@@ -31,6 +31,8 @@ python main.py
 ```
 
 The server will start on `http://0.0.0.0:32000`.
+
+If `frontend/` exists with a built BeeView app, open `http://localhost:32000` for the UI.
 
 #### Option 2: Using manage_db.py
 
@@ -59,29 +61,57 @@ You can configure the following environment variables:
 
 ### Data Requirements
 
-The server requires the following data files to be present in the `data/` directory for full functionality:
+The server supports two workflows:
 
-- **Shapefile for land use/land cover data**:
-  - `lulc.shp` (main shapefile)
-  - `lulc.dbf` (attribute data)
-  - `lulc.prj` (projection information)
-  - `lulc.shx` (shape index)
-  - `lulc.cpg` (character encoding, optional)
+#### Modern workflow (recommended): `import_all_experiments.py`
 
-- **Nectar and pollen data**:
-  - `arr.dat` (HDF5 file containing nectar and pollen timeseries data)
+Import all experiment runs from the `experiments/` folder:
 
-- **Bee population data**:
-  - `output.csv` (CSV file with bee population information)
+```bash
+python import_all_experiments.py --clean
+```
 
-- **Vegetation mapping**:
-  - `vegetation classes.json` (JSON file defining vegetation classes)
-  - `land cover to vegetation default mapping.csv` (CSV mapping land cover to vegetation types)
+This scans `experiments/` for folders matching the pattern `exp{N}_TaG_hive{HH}_mc{MM}__{uuid}`, groups them by hive and treatment, and imports each MC run into the database with clean naming. Flags:
 
-- **Additional files**:
-  - `applications.txt` (application-specific data, if needed)
+| Flag | Effect |
+|------|--------|
+| `--clean` | Wipe all existing runs before importing (fresh start) |
+| `--force` | Replace individual runs that already exist |
+| `-v` | Verbose logging |
 
-The server will create a DuckDB database file (`beeview.duckdb`) in the `data/` directory on first run or when using `manage_db.py` to reload data.
+After import, the `data/` folder only needs:
+
+- `beeview.duckdb` — the database (auto-created)
+- `arr.dat` — HDF5 with nectar/pollen/vegetation timeseries
+- `vegetation classes.json` — vegetation class definitions
+- Shapefile (`*.shp`, `*.dbf`, `*.prj`, `*.shx`) — land use/land cover polygons
+
+Applications data (`applications.txt`) is imported into DuckDB (`applications` table) by `import_all_experiments.py` and served from the database.
+
+### Deployment Guides
+
+Detailed platform-specific deployment docs are in MkDocs:
+
+- Windows portable/xcopy deployment: `docs/deployment.md`
+- Unix/Linux build and deployment: `docs/deployment.md`
+
+Windows helper scripts in this repository:
+
+- `package.bat` — builds a `BeeView-portable/` handover folder
+- `setup.bat` — creates `venv` and installs dependencies on target machine
+- `start.bat` — launches BeeView-server and opens browser
+
+#### Legacy workflow: file-based startup
+
+Place all data files directly in `data/` and let the server load them on first startup. Required files:
+
+- `lulc.shp` (+ `.dbf`, `.prj`, `.shx`, `.cpg`) — land use shapefile
+- `arr.dat` — HDF5 nectar/pollen data
+- `output.csv` — BEEHAVE colony output
+- `vegetation classes.json` — vegetation class definitions
+- `land cover to vegetation default mapping.csv` — LULC to vegetation mapping
+
+The server creates `beeview.duckdb` in `data/` on first start.
 
 ### API Endpoints
 

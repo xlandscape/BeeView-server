@@ -120,3 +120,21 @@ class BeePopulation(Base):
     id: Mapped[int] = mapped_column(Integer, Sequence('bee_population_id_seq'), primary_key=True)
     metric_name: Mapped[str] = mapped_column(String(50))  # e.g., "totalEggs", "totalForagers"
     timeseries: Mapped[bytes] = mapped_column(LargeBinary)  # Pickled numpy array for 365 days
+
+
+class Application(Base):
+    """A single pesticide application event, owned by a Run."""
+    __tablename__ = "applications"
+    __table_args__ = (
+        Index("ix_applications_run_id", "run_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, Sequence("applications_id_seq"), primary_key=True)
+    run_id: Mapped[int] = mapped_column(Integer, ForeignKey("runs.id"), nullable=False)
+    lulc_feature_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    application_day: Mapped[int] = mapped_column(Integer, nullable=False)
+    conc_nectar: Mapped[float] = mapped_column(Float, nullable=False)
+    conc_pollen: Mapped[float] = mapped_column(Float, nullable=False)
+    contact: Mapped[float] = mapped_column(Float, nullable=False)
+
+    run = relationship("Run")

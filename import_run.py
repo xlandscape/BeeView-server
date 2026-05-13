@@ -32,6 +32,15 @@ from xml_parser import transform_coordinates_to_wgs84
 
 logger = logging.getLogger("import_run")
 
+
+def _relative_source_path(folder: Path) -> Path:
+    """Return *folder* as a path relative to CWD when possible (portability)."""
+    try:
+        return folder.resolve().relative_to(Path.cwd())
+    except ValueError:
+        return folder.resolve()
+
+
 # Canonical metrics used by compare UI and charts.
 CANONICAL_METRIC_COLUMNS = [
     "TotalIHbees + TotalForagers + TotalDroneEggs + TotalEggs + TotalDroneLarvae + TotalLarvae + TotalDronePupae + TotalPupae",
@@ -294,7 +303,7 @@ def import_run(run_folder: Path, force: bool = False) -> list[int]:
                 hive_y=meta["hive_y"],
                 hive_lon=hive_lon,
                 hive_lat=hive_lat,
-                source_path=str(run_folder.resolve()),
+                source_path=str(_relative_source_path(run_folder)),
                 sim_start=meta.get("sim_start"),
                 batch_sim_id=meta["sim_id"],  # Parent SimID
                 outer_mc_id=outer_mc_id,  # MC index

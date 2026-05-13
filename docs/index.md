@@ -32,12 +32,15 @@ python manage_db.py
 # 4. Import xPollinator runs
 python import_run.py path/to/xPollinator/run/MySimID
 
-# 5. Open BeeView at http://localhost:8083
+# 5. Open BeeView at http://localhost:32000
 ```
+
+For production-like deployment workflows, see [Deployment](deployment.md).
 
 ## Documentation
 
 - [Installation](installation.md) — setting up the Python environment and dependencies
+- [Deployment](deployment.md) — Windows portable/xcopy and Unix/Linux deployment workflows
 - [Data Requirements](data-requirements.md) — which files are needed from xPollinator
 - [Importing Runs](importing-runs.md) — how `import_run.py` works and what it reads
 - [Batch Processing](batch-processing.md) — preparing multi-hive, multi-MC experiment folders
