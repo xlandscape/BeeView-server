@@ -47,6 +47,49 @@ The app is served from one endpoint: [http://localhost:32000](http://localhost:3
 - `start.bat` opens the browser automatically.
 - To stop the server, press `Ctrl+C` in the terminal window.
 
+## Reusing an Existing DuckDB File
+
+If you already have a populated `beeview.duckdb`, you can deploy with that file directly and skip re-importing runs.
+
+### Windows
+
+1. Copy your existing DB to:
+
+```bat
+BeeView-portable\data\beeview.duckdb
+```
+
+2. If a DB already exists in the target folder, replace it while the server is stopped.
+3. Start normally:
+
+```bat
+setup.bat
+start.bat
+```
+
+### Unix/Linux
+
+1. Copy your existing DB to:
+
+```bash
+cp /path/to/beeview.duckdb /opt/BeeView-server/data/beeview.duckdb
+```
+
+2. Ensure server process is stopped before replacing the file.
+3. Start the service/app again (`python main.py`, `uvicorn`, or `systemctl start beeview-server`).
+
+### Compatibility checks
+
+The DB should include current BeeView-server tables (`runs`, `bee_population_replicate`, `applications`, plus landscape tables).
+
+Quick verification after startup:
+
+1. `GET /api/runs` returns run records.
+2. `GET /api/applications?run_id=<treated_id>` returns application rows.
+3. Frontend loads at `/` without triggering re-import workflows.
+
+If schema mismatches occur (older DB), rebuild by importing runs again with current scripts.
+
 ## Unix/Linux Build and Deployment
 
 Use this when deploying to Linux hosts, VMs, or lab servers.
