@@ -58,6 +58,9 @@ You can configure the following environment variables:
 - `BEE_POPULATION_PATH`: Path to the bee population data (default: `data/output.csv`)
 - `VEGETATION_CLASSES_PATH`: Path to the vegetation classes JSON (default: `data/vegetation classes.json`)
 - `BEEHIVE_RADIUS_KM`: Radius around the beehive location in kilometers (default: `30.0`)
+- `GEOJSON_SIMPLIFY_TOLERANCE`: Topology-preserving simplification tolerance in degrees for the landscape GeoJSON served to the browser (default: `0.00001`, about 1 m; `0` disables)
+- `GEOJSON_PRECISION`: Decimal places kept in served coordinates (default: `6`)
+- `GEOJSON_CACHE_DIR`: Where the precomputed GeoJSON cache is stored (default: `data/cache`); delete it to force a rebuild
 
 ### Data Requirements
 

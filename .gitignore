@@ -141,3 +141,5 @@ Thumbs.db
 # MkDocs build output
 site/
 .venv/
+# Precomputed landscape GeoJSON cache (rebuilt automatically)
+data/cache/

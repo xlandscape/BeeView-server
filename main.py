@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 import h5py
 import json
@@ -33,6 +34,7 @@ from load_feature_ids import load_feature_ids_to_db
 from load_vegetation_classes import load_vegetation_classes_to_db
 from load_vegetation import load_vegetation_to_db
 from xml_parser import get_beehive_location, get_beehive_buffer_bounds
+from geometry_cache import cache as geometry_cache
 from compare import (
     compute_ed_matrix,
     compute_exceedance,
@@ -58,6 +60,7 @@ logging.getLogger('load_vegetation').setLevel(logging.INFO)
 logging.getLogger('load_nectar').setLevel(logging.INFO)
 logging.getLogger('load_pollen').setLevel(logging.INFO)
 logging.getLogger('load_bee_population').setLevel(logging.INFO)
+logging.getLogger('geometry_cache').setLevel(logging.INFO)
 logging.getLogger('load_vegetation_mapping').setLevel(logging.INFO)
 
 # Main app logger
@@ -79,10 +82,31 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-) 
+)
+
+# Compress every JSON/JS/CSS response above 1 KB. /geojson serves a pre-gzipped
+# body with Content-Encoding already set, which this middleware passes through.
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=6)
+
+
+@app.middleware("http")
+async def static_cache_headers(request: Request, call_next):
+    """Vite emits content-hashed filenames under /assets, so they can be cached forever."""
+    response = await call_next(request)
+    if request.url.path.startswith("/assets/") and response.status_code == 200:
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return response
+
 
 @app.on_event("startup")
 def startup_event():
+    _initialize_database()
+    # Build the simplified landscape GeoJSON off the request path. Until it is
+    # ready, /geojson and /geojson/viewport wait for it (or fall back if it fails).
+    geometry_cache.start_background_build()
+
+
+def _initialize_database():
     # Check if database file exists
     db_file_path = "data/beeview.duckdb"
     database_exists = os.path.exists(db_file_path)
@@ -292,14 +316,32 @@ def get_features_vegetation_mapping():
         session.close()
 
 @app.get("/geojson")
-def get_geojson():
+def get_geojson(request: Request):
+    """Full landscape as GeoJSON (simplified, precision-rounded, pre-gzipped, ETag-cached)."""
+    if geometry_cache.wait_ready(timeout=120):
+        headers = {
+            "ETag": geometry_cache.etag,
+            "Cache-Control": "public, max-age=0, must-revalidate",
+            "Vary": "Accept-Encoding",
+        }
+        if request.headers.get("if-none-match") == geometry_cache.etag:
+            return Response(status_code=304, headers=headers)
+        if "gzip" in request.headers.get("accept-encoding", ""):
+            headers["Content-Encoding"] = "gzip"
+            return Response(content=geometry_cache.full_gzip, media_type="application/json", headers=headers)
+        return Response(content=geometry_cache.full_bytes, media_type="application/json", headers=headers)
+
+    logger.warning("/geojson: geometry cache unavailable, serving unsimplified geometry from the database")
+    return _get_geojson_legacy()
+
+
+def _get_geojson_legacy():
     session = next(get_session())
     try:
         result = session.execute(text("SELECT id, feature_id, name, l1_code, l1_label, l2_code, l2_label, l3_code, l3_label, area_hectares, geometry FROM features"))
         features = []
         for row in result:
             geom = wkt.loads(row[10])  # geometry is now at index 10
-            # geom = geom.simplify(0.1, preserve_topology=True)
             geojson_geom = mapping(geom)
             features.append({
                 "id": row[1],  # feature_id
@@ -318,6 +360,12 @@ def get_geojson():
         return JSONResponse(content={"type": "FeatureCollection", "features": features})
     finally:
         session.close()
+
+
+@app.get("/api/geojson/cache-status")
+def get_geojson_cache_status():
+    """Diagnostics for the in-memory landscape GeoJSON cache."""
+    return geometry_cache.stats()
 
 @app.get("/geojson/viewport")
 def get_geojson_viewport(
@@ -340,6 +388,11 @@ def get_geojson_viewport(
         zoom: Current zoom level for geometry simplification
         simplify_tolerance: Optional geometry simplification tolerance
     """
+    if geometry_cache.wait_ready(timeout=120):
+        body, _ = geometry_cache.viewport(min_lng, min_lat, max_lng, max_lat)
+        return Response(content=body, media_type="application/json")
+
+    logger.warning("/geojson/viewport: geometry cache unavailable, scanning all geometries in the database")
     session = next(get_session())
     try:
         # Calculate simplification tolerance based on zoom level if not provided

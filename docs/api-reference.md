@@ -10,17 +10,31 @@ This page documents the key endpoints used by the BeeView frontend.
 
 Returns all landscape features as GeoJSON.
 
+Geometry is served from a precomputed in-memory cache: simplified with a
+topology-preserving tolerance (`GEOJSON_SIMPLIFY_TOLERANCE`, default 1e-5 deg,
+about 1 m) and rounded to `GEOJSON_PRECISION` decimals (default 6). The
+response is pre-gzipped and carries an `ETag`; clients that send
+`If-None-Match` get a `304` when the landscape has not changed. The cache is
+persisted under `data/cache/` and rebuilt automatically when the `features`
+table or the settings change.
+
+### `GET /api/geojson/cache-status`
+
+Diagnostics for the landscape GeoJSON cache (`ready`, feature count, raw and
+gzipped size, active tolerance/precision).
+
 ### `GET /geojson/viewport`
 
-Returns features filtered to the current map viewport bounds.
+Returns features intersecting the current map viewport bounds, answered from a
+spatial index over the cached (simplified) geometries.
 
 **Parameters:**
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `min_lat`, `max_lat` | float | Latitude bounds |
-| `min_lon`, `max_lon` | float | Longitude bounds |
-| `zoom` | float | Current zoom level (for potential simplification) |
+| `min_lng`, `max_lng` | float | Longitude bounds |
+| `zoom` | float | Current zoom level (accepted, currently unused) |
 
 ### `GET /nectar/max/viewport`, `GET /pollen/max/viewport`
 
