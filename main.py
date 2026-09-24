@@ -1687,6 +1687,89 @@ def api_compare_survival(
 
 
 # ---------------------------------------------------------------------------
+# Simulation Management API
+# ---------------------------------------------------------------------------
+from simulation import start_simulation, get_job, list_jobs, cancel_job
+from scenarios import list_scenarios, get_scenario_bounds
+from pydantic import BaseModel
+from typing import Optional
+
+
+class SimulationRequest(BaseModel):
+    SimID: str
+    Project: str
+    SimulationStart: str = "2021-01-01"
+    SimulationEnd: str = "2021-12-31"
+    NumberBeeHaveTimesteps: int = 365
+    BeeHaveMapCenterPointX: float
+    BeeHaveMapCenterPointY: float
+    NumberBeeHaveReplicates: int = 1
+    BeeHaveRandomSeed: int = 1
+    BeeHaveWeather: str = "Rothamsted (2009)"
+    BeeHaveWeatherFile: Optional[str] = None
+    MinNumberApplications: int = 0
+    MaxNumberApplications: int = 0
+    RunLabel: Optional[str] = None
+    HiveGroupId: Optional[str] = None
+    NumberMC: Optional[int] = 1
+
+
+@app.get("/api/scenarios")
+def api_list_scenarios():
+    """List available xPollinator scenarios."""
+    return list_scenarios()
+
+
+@app.get("/api/scenarios/{folder_name}/bounds")
+def api_scenario_bounds(folder_name: str):
+    """Get geographic bounds for a scenario (for map centering and hive placement)."""
+    bounds = get_scenario_bounds(folder_name)
+    if bounds is None:
+        raise HTTPException(status_code=404, detail=f"Scenario not found or no shapefile: {folder_name}")
+    return bounds
+
+
+@app.post("/api/simulate")
+def api_start_simulation(request: SimulationRequest):
+    """Start a new xPollinator simulation."""
+    params = request.model_dump(exclude_none=True)
+    # Use SimID as RunLabel if not provided
+    if not params.get("RunLabel"):
+        params["RunLabel"] = params["SimID"]
+    if not params.get("HiveGroupId"):
+        params["HiveGroupId"] = params["SimID"]
+
+    job_id, error = start_simulation(params)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    return {"job_id": job_id, "sim_id": params["SimID"]}
+
+
+@app.get("/api/simulate/jobs")
+def api_list_jobs():
+    """List all simulation jobs."""
+    return list_jobs()
+
+
+@app.get("/api/simulate/jobs/{job_id}")
+def api_get_job(job_id: str):
+    """Get status of a specific simulation job."""
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job.to_dict()
+
+
+@app.delete("/api/simulate/jobs/{job_id}")
+def api_cancel_job(job_id: str):
+    """Cancel a running or queued simulation."""
+    error = cancel_job(job_id)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    return {"status": "cancelled"}
+
+
+# ---------------------------------------------------------------------------
 # Serve built frontend (BeeView dist/) if the folder exists.
 # Must be mounted AFTER all /api routes so API takes priority.
 # ---------------------------------------------------------------------------
