@@ -35,6 +35,7 @@ from load_vegetation_classes import load_vegetation_classes_to_db
 from load_vegetation import load_vegetation_to_db
 from xml_parser import get_beehive_location, get_beehive_buffer_bounds
 from geometry_cache import cache as geometry_cache
+from forage_cache import cache as forage_cache
 from compare import (
     compute_ed_matrix,
     compute_exceedance,
@@ -61,6 +62,7 @@ logging.getLogger('load_nectar').setLevel(logging.INFO)
 logging.getLogger('load_pollen').setLevel(logging.INFO)
 logging.getLogger('load_bee_population').setLevel(logging.INFO)
 logging.getLogger('geometry_cache').setLevel(logging.INFO)
+logging.getLogger('forage_cache').setLevel(logging.INFO)
 logging.getLogger('load_vegetation_mapping').setLevel(logging.INFO)
 
 # Main app logger
@@ -104,6 +106,7 @@ def startup_event():
     # Build the simplified landscape GeoJSON off the request path. Until it is
     # ready, /geojson and /geojson/viewport wait for it (or fall back if it fails).
     geometry_cache.start_background_build()
+    forage_cache.start_background_build()
 
 
 def _initialize_database():
@@ -367,6 +370,57 @@ def get_geojson_cache_status():
     """Diagnostics for the in-memory landscape GeoJSON cache."""
     return geometry_cache.stats()
 
+
+# ---------------------------------------------------------------------------
+# Forage matrices: whole nectar/pollen tables as compact binary downloads so
+# the browser can scrub through the year without further requests.
+# ---------------------------------------------------------------------------
+@app.get("/api/forage/index")
+def get_forage_index():
+    """Row order (feature ids) and day count for /api/forage/{kind}.f32."""
+    if not forage_cache.wait_ready(timeout=120):
+        raise HTTPException(status_code=503, detail="Forage matrices not available")
+    return {
+        "feature_ids": forage_cache.feature_ids.tolist(),
+        "days": forage_cache.n_days,
+        "kinds": list(forage_cache.matrix.keys()),
+        "etag": forage_cache.etag,
+    }
+
+
+@app.get("/api/forage/{kind}.f32")
+def get_forage_matrix(kind: str, request: Request):
+    """Row-major little-endian float32 matrix (features x days), pre-gzipped, ETag-cached."""
+    if kind not in ("nectar", "pollen"):
+        raise HTTPException(status_code=404, detail=f"Unknown forage kind: {kind}")
+    if not forage_cache.wait_ready(timeout=120):
+        raise HTTPException(status_code=503, detail="Forage matrices not available")
+    headers = {
+        "ETag": forage_cache.etag,
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Vary": "Accept-Encoding",
+        "X-Forage-Rows": str(len(forage_cache.feature_ids)),
+        "X-Forage-Days": str(forage_cache.n_days),
+    }
+    if request.headers.get("if-none-match") == forage_cache.etag:
+        return Response(status_code=304, headers=headers)
+    if "gzip" in request.headers.get("accept-encoding", ""):
+        headers["Content-Encoding"] = "gzip"
+        return Response(content=forage_cache.gzip_bytes[kind], media_type="application/octet-stream", headers=headers)
+    return Response(content=forage_cache.matrix[kind].tobytes(), media_type="application/octet-stream", headers=headers)
+
+
+@app.get("/api/forage/cache-status")
+def get_forage_cache_status():
+    return forage_cache.stats()
+
+
+def _viewport_feature_ids(min_lng, min_lat, max_lng, max_lat):
+    """Feature ids intersecting the bbox, from the geometry cache (None if unavailable)."""
+    if geometry_cache.wait_ready(timeout=120):
+        return geometry_cache.feature_ids_in_bbox(min_lng, min_lat, max_lng, max_lat)
+    return None
+
 @app.get("/geojson/viewport")
 def get_geojson_viewport(
     min_lng: float,
@@ -464,6 +518,8 @@ def get_geojson_viewport(
 
 @app.get("/nectar/max")
 def get_nectar_max():
+    if forage_cache.wait_ready(timeout=120):
+        return {"max_nectar": [{"feature_id": f, "max_nectar": v} for f, v in forage_cache.maxima("nectar")]}
     session = next(get_session())
     try:
         result = session.execute(text("""
@@ -488,6 +544,9 @@ def get_nectar_max_viewport(
     max_lat: float
 ):
     """Get nectar max values for features within the viewport."""
+    ids = _viewport_feature_ids(min_lng, min_lat, max_lng, max_lat)
+    if ids is not None and forage_cache.wait_ready(timeout=120):
+        return {"max_nectar": [{"feature_id": f, "max_nectar": v} for f, v in forage_cache.maxima("nectar", ids)]}
     session = next(get_session())
     try:
         # Get features in viewport first
@@ -543,6 +602,11 @@ def stream_nectar():
 
 @app.get("/nectar/timeseries/{feature_id}")
 def get_nectar_timeseries(feature_id: str):
+    if forage_cache.wait_ready(timeout=120):
+        series = forage_cache.series("nectar", int(feature_id))
+        if series is None:
+            raise HTTPException(status_code=404, detail="Feature ID not found or no nectar data")
+        return {"feature_id": feature_id, "nectar_timeseries": series}
     session = next(get_session())
     try:
         result = session.execute(text("""
@@ -563,6 +627,8 @@ def get_nectar_timeseries(feature_id: str):
 
 @app.get("/pollen/max")
 def get_pollen_max():
+    if forage_cache.wait_ready(timeout=120):
+        return {"max_pollen": [{"feature_id": f, "max_pollen": v} for f, v in forage_cache.maxima("pollen")]}
     session = next(get_session())
     try:
         result = session.execute(text("""
@@ -587,6 +653,9 @@ def get_pollen_max_viewport(
     max_lat: float
 ):
     """Get pollen max values for features within the viewport."""
+    ids = _viewport_feature_ids(min_lng, min_lat, max_lng, max_lat)
+    if ids is not None and forage_cache.wait_ready(timeout=120):
+        return {"max_pollen": [{"feature_id": f, "max_pollen": v} for f, v in forage_cache.maxima("pollen", ids)]}
     session = next(get_session())
     try:
         # Get features in viewport first
@@ -633,6 +702,11 @@ def get_pollen_max_viewport(
 
 @app.get("/pollen/timeseries/{feature_id}")
 def get_pollen_timeseries(feature_id: str):
+    if forage_cache.wait_ready(timeout=120):
+        series = forage_cache.series("pollen", int(feature_id))
+        if series is None:
+            raise HTTPException(status_code=404, detail="Feature ID not found or no pollen data")
+        return {"feature_id": feature_id, "pollen_timeseries": series}
     session = next(get_session())
     try:
         result = session.execute(text("""
@@ -707,6 +781,9 @@ def get_nectar_viewport_timeseries():
 @app.get("/api/nectar/time-point/{date}")
 def get_nectar_for_time_point(date: str):
     """Get nectar values for all features at a specific time point."""
+    if forage_cache.wait_ready(timeout=120):
+        return {"nectar_data": [{"feature_id": f, "nectar_concentration": v, "date": date}
+                                for f, v in forage_cache.day_values("nectar", date)], "date": date}
     session = next(get_session())
     try:
         result = session.execute(text("""
@@ -760,6 +837,10 @@ def get_nectar_for_time_point_viewport(
     max_lat: float
 ):
     """Get nectar values for viewport features at a specific time point."""
+    ids = _viewport_feature_ids(min_lng, min_lat, max_lng, max_lat)
+    if ids is not None and forage_cache.wait_ready(timeout=120):
+        return {"nectar_data": [{"feature_id": f, "nectar_concentration": v, "date": date}
+                                for f, v in forage_cache.day_values("nectar", date, ids)], "date": date}
     session = next(get_session())
     try:
         # Get features in viewport first
@@ -832,6 +913,9 @@ def get_nectar_for_time_point_viewport(
 @app.get("/api/pollen/time-point/{date}")
 def get_pollen_for_time_point(date: str):
     """Get pollen values for all features at a specific time point."""
+    if forage_cache.wait_ready(timeout=120):
+        return {"pollen_data": [{"feature_id": f, "pollen_concentration": v, "date": date}
+                                for f, v in forage_cache.day_values("pollen", date)], "date": date}
     session = next(get_session())
     try:
         result = session.execute(text("""
@@ -884,6 +968,10 @@ def get_pollen_for_time_point_viewport(
     max_lat: float
 ):
     """Get pollen values for viewport features at a specific time point."""
+    ids = _viewport_feature_ids(min_lng, min_lat, max_lng, max_lat)
+    if ids is not None and forage_cache.wait_ready(timeout=120):
+        return {"pollen_data": [{"feature_id": f, "pollen_concentration": v, "date": date}
+                                for f, v in forage_cache.day_values("pollen", date, ids)], "date": date}
     session = next(get_session())
     try:
         # Get features in viewport first
@@ -908,12 +996,8 @@ def get_pollen_for_time_point_viewport(
         if not viewport_feature_ids:
             return {"pollen_data": [], "date": date}
         
-        try:
-            from datetime import datetime
-            date_obj = datetime.strptime(date, '%Y-%m-%d')
-            time_index = date_obj.timetuple().tm_yday - 1
-        except:
-            time_index = 0
+        from forage_cache import parse_day_index
+        time_index = parse_day_index(date, 365)
         
         feature_ids_str = ','.join(map(str, viewport_feature_ids))
         pollen_query = text(f"""
@@ -949,6 +1033,9 @@ def get_pollen_for_time_point_viewport(
 def get_timeseries_averages(feature_ids: str = None, include_nectar: bool = True, include_pollen: bool = True):
     """Get average nectar and pollen values for selected features across all days.
     If no feature_ids provided, returns average across ALL features."""
+    if forage_cache.wait_ready(timeout=120):
+        ids = [int(x) for x in feature_ids.split(',') if x.strip()] if feature_ids else None
+        return {"averages": forage_cache.averages(ids, include_nectar, include_pollen)}
     session = next(get_session())
     try:
         # Parse feature_ids from comma-separated string if provided

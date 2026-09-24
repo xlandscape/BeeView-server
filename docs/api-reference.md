@@ -23,6 +23,21 @@ table or the settings change.
 Diagnostics for the landscape GeoJSON cache (`ready`, feature count, raw and
 gzipped size, active tolerance/precision).
 
+### `GET /api/forage/index`, `GET /api/forage/{kind}.f32`
+
+Whole nectar/pollen tables for client-side use. `index` returns the row order
+(`feature_ids`) and `days`; `nectar.f32` / `pollen.f32` return a row-major
+little-endian float32 matrix (`features x days`), pre-gzipped with an `ETag`.
+The values are highly repetitive, so each matrix is well under 1 MB on the
+wire. The BeeView UI downloads both once and derives per-day values, yearly
+maxima and selected-feature averages locally. `/api/forage/cache-status`
+reports readiness.
+
+The per-day endpoints below (`/api/{nectar,pollen}/time-point/...`,
+`/nectar/max`, `/pollen/max`, `/api/timeseries/averages`,
+`/{nectar,pollen}/timeseries/{id}`) are served from the same in-memory
+matrices and remain available for other clients.
+
 ### `GET /geojson/viewport`
 
 Returns features intersecting the current map viewport bounds, answered from a
@@ -72,13 +87,8 @@ Lists all imported runs with their metadata.
 
 ### `GET /api/bee-population/timeseries`
 
-Returns the legacy single-run bee population timeseries.
-
-**Parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `run_id` | int | Run ID (optional — uses legacy data if omitted) |
+Returns the legacy single-run bee population timeseries. Takes no parameters;
+per-run data comes from `/api/bee-population/replicates`.
 
 ### `GET /api/bee-population/replicates`
 

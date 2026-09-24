@@ -43,7 +43,7 @@ from database import get_session
 
 logger = logging.getLogger(__name__)
 
-CACHE_FORMAT_VERSION = 1
+CACHE_FORMAT_VERSION = 2
 
 SIMPLIFY_TOLERANCE = float(os.getenv("GEOJSON_SIMPLIFY_TOLERANCE", "0.00001"))
 PRECISION = int(os.getenv("GEOJSON_PRECISION", "6"))
@@ -67,6 +67,7 @@ class GeometryCache:
         self.fingerprint: Optional[str] = None
         self.etag: Optional[str] = None
         self.feature_json: List[str] = []
+        self.feature_ids: np.ndarray = np.zeros(0, dtype=np.int64)
         self.tree: Optional[STRtree] = None
         self.full_bytes: bytes = b""
         self.full_gzip: bytes = b""
@@ -155,6 +156,7 @@ class GeometryCache:
 
         feature_json: List[str] = []
         wkb: List[bytes] = []
+        feature_ids: List[int] = []
         skipped = 0
         for row in rows:
             try:
@@ -177,6 +179,7 @@ class GeometryCache:
             feature = {"type": "Feature", "id": row.feature_id, "properties": props, "geometry": mapping(geom)}
             feature_json.append(json.dumps(feature, separators=(",", ":")))
             wkb.append(shapely.to_wkb(geom))
+            feature_ids.append(int(row.feature_id))
 
         if skipped:
             logger.warning("GEOJSON CACHE: skipped %d features with invalid geometry", skipped)
@@ -186,6 +189,7 @@ class GeometryCache:
             "version": CACHE_FORMAT_VERSION,
             "fingerprint": fingerprint,
             "feature_json": feature_json,
+            "feature_ids": feature_ids,
             "wkb": wkb,
             "full_gzip": gzip.compress(full_bytes, compresslevel=6),
         }
@@ -194,6 +198,7 @@ class GeometryCache:
         self.fingerprint = payload["fingerprint"]
         self.etag = f'"{self.fingerprint[:16]}"'
         self.feature_json = payload["feature_json"]
+        self.feature_ids = np.asarray(payload["feature_ids"], dtype=np.int64)
         self.full_bytes = _assemble(self.feature_json)
         self.full_gzip = payload["full_gzip"]
         self.tree = STRtree(shapely.from_wkb(payload["wkb"]))
@@ -228,6 +233,10 @@ class GeometryCache:
             logger.warning("GEOJSON CACHE: could not persist cache to %s: %s", path, exc)
 
     # ----------------------------------------------------------------- queries
+    def feature_ids_in_bbox(self, min_lng: float, min_lat: float, max_lng: float, max_lat: float) -> List[int]:
+        idx = self.tree.query(box(min_lng, min_lat, max_lng, max_lat), predicate="intersects")
+        return self.feature_ids[np.sort(idx)].tolist()
+
     def viewport(self, min_lng: float, min_lat: float, max_lng: float, max_lat: float) -> Tuple[bytes, int]:
         """Return the FeatureCollection body (bytes) for features intersecting the bbox."""
         bbox = box(min_lng, min_lat, max_lng, max_lat)

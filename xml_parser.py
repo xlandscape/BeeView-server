@@ -123,6 +123,10 @@ def transform_coordinates_to_wgs84(x: float, y: float, source_crs: str = None) -
         return None
 
 
+from functools import lru_cache
+
+
+@lru_cache(maxsize=8)
 def get_beehive_location(template_path: str = DEFAULT_TEMPLATE_PATH) -> Optional[dict]:
     """
     Get beehive location from template.xrun file and transform to WGS84.
@@ -215,6 +219,7 @@ def create_beehive_buffer(radius_km: float = 10.0, template_path: str = DEFAULT_
         return None
 
 
+@lru_cache(maxsize=8)
 def get_beehive_buffer_bounds(radius_km: float = 10.0, template_path: str = DEFAULT_TEMPLATE_PATH) -> Optional[dict]:
     """
     Get the bounding box of the beehive buffer area.

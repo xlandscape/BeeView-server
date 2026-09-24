@@ -34,7 +34,16 @@ def _parse_xproject(xproject_path: Path) -> dict:
         return {}
 
 
+from functools import lru_cache
+
+
+@lru_cache(maxsize=64)
 def _get_shapefile_bounds(scenario_path: Path) -> Optional[dict]:
+    """Cached: reading a scenario shapefile costs seconds and its bounds never change."""
+    return _read_shapefile_bounds(scenario_path)
+
+
+def _read_shapefile_bounds(scenario_path: Path) -> Optional[dict]:
     """Get geographic bounds from the scenario's shapefile."""
     geo_dir = scenario_path / "geo"
     if not geo_dir.is_dir():
