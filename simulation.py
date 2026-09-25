@@ -17,6 +17,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+from gaps import GAP_PARAM_KEYS, expand_gap
+
 logger = logging.getLogger("simulation")
 
 # ---------------------------------------------------------------------------
@@ -86,7 +88,7 @@ def _generate_xrun_xml(params: dict) -> str:
         "NumberBeeHaveTimesteps", "BeeHaveMapCenterPointX", "BeeHaveMapCenterPointY",
         "NumberBeeHaveReplicates", "BeeHaveRandomSeed", "BeeHaveWeather",
         "BeeHaveWeatherFile", "MinNumberApplications", "MaxNumberApplications",
-        "RunLabel", "HiveGroupId", "NumberMC",
+        "RunLabel", "HiveGroupId", "NumberMC", "GAP", *GAP_PARAM_KEYS,
     ]
     for key in param_order:
         value = params.get(key)
@@ -127,6 +129,12 @@ def _validate_params(params: dict) -> Optional[str]:
     scenario_path = XPOLLINATOR_PATH / project
     if not scenario_path.is_dir():
         return f"Scenario folder not found: {project}"
+
+    # Validate exposure window
+    first_day = int(params.get("FirstDayOfYearApplications", 1))
+    last_day = int(params.get("LastDayOfYearApplications", 365))
+    if not 1 <= first_day <= last_day <= 366:
+        return "FirstDayOfYearApplications must be <= LastDayOfYearApplications, both within 1..366"
 
     return None
 
@@ -233,6 +241,9 @@ def start_simulation(params: dict) -> tuple[Optional[str], Optional[str]]:
     
     Returns (job_id, None) on success or (None, error_message) on validation failure.
     """
+    params, error = expand_gap(params)
+    if error:
+        return None, error
     error = _validate_params(params)
     if error:
         return None, error

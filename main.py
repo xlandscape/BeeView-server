@@ -1871,6 +1871,7 @@ def api_compare_survival(
 # ---------------------------------------------------------------------------
 from simulation import start_simulation, get_job, list_jobs, cancel_job
 from scenarios import list_scenarios, get_scenario_bounds
+from gaps import list_gaps, get_gap, gap_parameter_info
 from pydantic import BaseModel
 from typing import Optional
 
@@ -1892,6 +1893,41 @@ class SimulationRequest(BaseModel):
     RunLabel: Optional[str] = None
     HiveGroupId: Optional[str] = None
     NumberMC: Optional[int] = 1
+    # GAP preset (model/variant/gaps.json in xPollinator). Individual values below override the preset.
+    GAP: Optional[str] = None
+    AppliedVegetationId: Optional[int] = None
+    FirstDayOfYearApplications: Optional[int] = None
+    LastDayOfYearApplications: Optional[int] = None
+    ExposurePeriod: Optional[int] = None
+    ContactToxicityMean: Optional[float] = None
+    ContactToxicityStd: Optional[float] = None
+    ConcNectarMean: Optional[float] = None
+    ConcNectarStd: Optional[float] = None
+    ConcPollenMean: Optional[float] = None
+    ConcPollenStd: Optional[float] = None
+    ResidueUnitDose: Optional[float] = None
+    PlantDT50: Optional[float] = None
+    ForagerOralLD50: Optional[float] = None
+    ForagerOralSlope: Optional[float] = None
+    ForagerContactLD50: Optional[float] = None
+    ForagerContactSlope: Optional[float] = None
+    LarvaeOralLD50: Optional[float] = None
+    LarvaeOralSlope: Optional[float] = None
+
+
+@app.get("/api/gaps")
+def api_list_gaps():
+    """List GAP presets (substance toxicity + crop exposure bundles) available for simulations."""
+    return {"parameters": gap_parameter_info(), "gaps": list_gaps()}
+
+
+@app.get("/api/gaps/{gap_id}")
+def api_get_gap(gap_id: str):
+    """Get a single GAP preset."""
+    gap = get_gap(gap_id)
+    if gap is None:
+        raise HTTPException(status_code=404, detail=f"GAP not found: {gap_id}")
+    return gap
 
 
 @app.get("/api/scenarios")
