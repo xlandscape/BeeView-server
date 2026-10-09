@@ -4,6 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 import h5py
+import gzip
+import hashlib
+import threading
 import json
 import glob
 import numpy as np
@@ -288,35 +291,72 @@ def get_vegetation_class_name(vegetation_class: int):
     finally:
         session.close()
 
+_VEG_MAPPING_QUERY = text("""
+    SELECT f.feature_id, v.vegetation_class, vcm.vegetation_name
+    FROM features f
+    LEFT JOIN feature_ids fi ON f.feature_id = fi.feature_id
+    LEFT JOIN vegetation v ON fi.index = v.feature_index
+    LEFT JOIN vegetation_class_mapping vcm ON v.vegetation_class = vcm.vegetation_class
+    WHERE f.feature_id IS NOT NULL
+    ORDER BY f.feature_id
+""")
+_veg_mapping_cache: dict | None = None
+_veg_mapping_lock = threading.Lock()
+
+
+def _vegetation_mapping_payload() -> dict:
+    """Serialised, pre-gzipped body of /api/features/vegetation-mapping.
+
+    Built once per process. DuckDB holds an exclusive lock on the database
+    while the server runs, so the underlying tables cannot change until the
+    server is restarted; caching for the process lifetime is therefore safe.
+    The join + 25k-row serialisation previously cost ~300 ms on every page load.
+    """
+    global _veg_mapping_cache
+    if _veg_mapping_cache is not None:
+        return _veg_mapping_cache
+    with _veg_mapping_lock:
+        if _veg_mapping_cache is not None:
+            return _veg_mapping_cache
+        session = next(get_session())
+        try:
+            mappings = [
+                {
+                    "feature_id": row.feature_id,  # shapefile feature_id, consistent with /geojson ids
+                    "vegetation_class": row.vegetation_class,
+                    "vegetation_name": row.vegetation_name,
+                }
+                for row in session.execute(_VEG_MAPPING_QUERY)
+            ]
+        finally:
+            session.close()
+        raw = json.dumps({"feature_vegetation_mappings": mappings}, separators=(",", ":")).encode("utf-8")
+        _veg_mapping_cache = {
+            "raw": raw,
+            "gzip": gzip.compress(raw, compresslevel=6),
+            "etag": f'"{hashlib.sha1(raw).hexdigest()[:16]}"',
+        }
+        return _veg_mapping_cache
+
+
 @app.get("/api/features/vegetation-mapping")
-def get_features_vegetation_mapping():
-    """Get vegetation classes for all features"""
-    session = next(get_session())
+def get_features_vegetation_mapping(request: Request):
+    """Get vegetation classes for all features (cached, pre-gzipped, ETag)."""
     try:
-        query = text("""
-            SELECT f.feature_id, v.vegetation_class, vcm.vegetation_name
-            FROM features f
-            LEFT JOIN feature_ids fi ON f.feature_id = fi.feature_id
-            LEFT JOIN vegetation v ON fi.index = v.feature_index
-            LEFT JOIN vegetation_class_mapping vcm ON v.vegetation_class = vcm.vegetation_class
-            WHERE f.feature_id IS NOT NULL
-            ORDER BY f.feature_id
-        """)
-        result = session.execute(query)
-
-        mappings = []
-        for row in result:
-            mappings.append({
-                "feature_id": row.feature_id,  # Use the actual shapefile feature_id consistently
-                "vegetation_class": row.vegetation_class,
-                "vegetation_name": row.vegetation_name
-            })
-
-        return {"feature_vegetation_mappings": mappings}
+        payload = _vegetation_mapping_payload()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
+    headers = {
+        "ETag": payload["etag"],
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Vary": "Accept-Encoding",
+    }
+    if request.headers.get("if-none-match") == payload["etag"]:
+        return Response(status_code=304, headers=headers)
+    if "gzip" in request.headers.get("accept-encoding", ""):
+        headers["Content-Encoding"] = "gzip"
+        return Response(content=payload["gzip"], media_type="application/json", headers=headers)
+    return Response(content=payload["raw"], media_type="application/json", headers=headers)
 
 @app.get("/geojson")
 def get_geojson(request: Request):
