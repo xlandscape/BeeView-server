@@ -32,6 +32,7 @@ class Run(Base):
     scenario: Mapped[str] = mapped_column(String(200), nullable=True)
     hive_group_id: Mapped[str] = mapped_column(String(100), nullable=True)
     treatment_on: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    gap: Mapped[str] = mapped_column(String(100), nullable=True)  # GAP preset id from the .xrun (<GAP>), e.g. thiacloprid_apple_EU_120
     n_replicates: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     random_seed: Mapped[int] = mapped_column(Integer, nullable=True)
     hive_x: Mapped[float] = mapped_column(Float, nullable=True)

@@ -1535,6 +1535,7 @@ def _run_to_dict(run: Run) -> dict:
         "outer_mc_id": getattr(run, "outer_mc_id", None),
         "mc_folder_name": getattr(run, "mc_folder_name", None),
         "treatment_on": bool(run.treatment_on),
+        "gap": getattr(run, "gap", None),
         "n_replicates": run.n_replicates,
         "random_seed": run.random_seed,
         "hive_x": run.hive_x,

@@ -100,6 +100,8 @@ def ensure_runs_schema(session) -> None:
         missing_ddl.append("ALTER TABLE runs ADD COLUMN outer_mc_id INTEGER")
     if "mc_folder_name" not in existing_columns:
         missing_ddl.append("ALTER TABLE runs ADD COLUMN mc_folder_name VARCHAR")
+    if "gap" not in existing_columns:
+        missing_ddl.append("ALTER TABLE runs ADD COLUMN gap VARCHAR")
 
     for ddl in missing_ddl:
         session.execute(text(ddl))
@@ -130,6 +132,7 @@ def parse_user_xml(user_xml_path: Path) -> dict:
         "n_replicates": int(_text(root, "NumberBeeHaveReplicates", "1") or 1),
         "random_seed": int(_text(root, "BeeHaveRandomSeed", "0") or 0),
         "treatment_on": max_apps > 0,
+        "gap": _text(root, "GAP"),
         "sim_start": _text(root, "SimulationStart"),
     }
 
@@ -297,6 +300,7 @@ def import_run(run_folder: Path, force: bool = False) -> list[int]:
                 scenario=meta["scenario"],
                 hive_group_id=meta["hive_group_id"] or meta["sim_id"].replace("_treated", ""),
                 treatment_on=meta["treatment_on"],
+                gap=meta.get("gap"),
                 n_replicates=n_replicates_actual,
                 random_seed=meta["random_seed"],
                 hive_x=meta["hive_x"],
