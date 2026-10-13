@@ -96,6 +96,22 @@ def _read_shapefile_bounds(scenario_path: Path) -> Optional[dict]:
         return None
 
 
+def _sunshine_hours_info(scenario_path: Path) -> Optional[dict]:
+    """Describe the scenario's weather/sunshine_hours.txt (first comment line), if present."""
+    path = scenario_path / "weather" / "sunshine_hours.txt"
+    if not path.is_file():
+        return None
+    description = None
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("#"):
+                description = line.lstrip("# ").strip()
+                break
+    except OSError:
+        return None
+    return {"file": str(path.relative_to(scenario_path)).replace("\\", "/"), "description": description}
+
+
 def list_scenarios() -> list[dict]:
     """List all available scenarios with metadata."""
     if not SCENARIO_BASE.is_dir():
@@ -116,6 +132,8 @@ def list_scenarios() -> list[dict]:
             "folder_name": entry.name,
             "path": f"scenario/{entry.name}",
             "has_shapefile": bool(list(geo_dir.glob("*.shp"))) if geo_dir.is_dir() else False,
+            # weather/sunshine_hours.txt shipped with the scenario (default SunshineHours), or None
+            "sunshine_hours": _sunshine_hours_info(entry),
         }
 
         if xproject.exists():

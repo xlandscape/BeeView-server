@@ -131,13 +131,50 @@ def _template_weather_defaults() -> dict:
     return _weather_defaults_cache
 
 
-def apply_weather_defaults(params: dict) -> tuple[dict, Optional[str]]:
-    """Fill missing SunshineHours / SeasonHoPoMoRepX* from template.xrun.
+SCENARIO_SUNSHINE_FILE = Path("weather") / "sunshine_hours.txt"
 
-    Returns (params, error). SunshineHours, if given, must hold exactly 365 numbers.
+
+def scenario_sunshine_hours(project: Optional[str]) -> Optional[str]:
+    """Sunshine series shipped with a scenario (<Project>/weather/sunshine_hours.txt), or None.
+
+    The file holds 365 numbers separated by whitespace/commas; '#' starts a comment.
+    """
+    if not project:
+        return None
+    folder = Path(project)
+    if not folder.is_absolute():
+        folder = XPOLLINATOR_PATH / folder
+    path = folder / SCENARIO_SUNSHINE_FILE
+    if not path.is_file():
+        return None
+    values = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.split("#", 1)[0].replace("[", " ").replace("]", " ").replace(",", " ")
+            values.extend(line.split())
+        [float(v) for v in values]
+    except (OSError, ValueError) as exc:
+        logger.warning("Ignoring unreadable sunshine file %s: %s", path, exc)
+        return None
+    if len(values) != 365:
+        logger.warning("Ignoring %s: expected 365 sunshine values, found %d", path, len(values))
+        return None
+    return " ".join(values)
+
+
+def apply_weather_defaults(params: dict) -> tuple[dict, Optional[str]]:
+    """Fill missing SunshineHours / SeasonHoPoMoRepX* defaults.
+
+    SunshineHours defaults to the scenario's weather/sunshine_hours.txt when the
+    scenario ships one, otherwise to template.xrun; the season parameters default to
+    template.xrun. Returns (params, error). SunshineHours, if given, must hold
+    exactly 365 numbers.
     """
     merged = dict(params)
-    defaults = _template_weather_defaults()
+    defaults = dict(_template_weather_defaults())
+    scenario_series = scenario_sunshine_hours(merged.get("Project"))
+    if scenario_series:
+        defaults["SunshineHours"] = scenario_series
     for key in WEATHER_PARAM_KEYS:
         value = merged.get(key)
         if value is None or not str(value).strip():
