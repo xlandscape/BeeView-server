@@ -1888,6 +1888,14 @@ class SimulationRequest(BaseModel):
     BeeHaveRandomSeed: int = 1
     BeeHaveWeather: str = "Rothamsted (2009)"
     BeeHaveWeatherFile: Optional[str] = None
+    # Daily sunshine hours (365 values, space-separated or list) and HoPoMo brood-season
+    # shape; omitted values default to xPollinator/template.xrun (Rothamsted 2009).
+    SunshineHours: Optional[str | list[float]] = None
+    SeasonHoPoMoRepX1: Optional[int] = None
+    SeasonHoPoMoRepX2: Optional[int] = None
+    SeasonHoPoMoRepX3: Optional[int] = None
+    SeasonHoPoMoRepX4: Optional[int] = None
+    SeasonHoPoMoRepX5: Optional[int] = None
     MinNumberApplications: int = 0
     MaxNumberApplications: int = 0
     RunLabel: Optional[str] = None

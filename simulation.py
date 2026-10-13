@@ -19,6 +19,15 @@ from typing import Optional
 
 from gaps import GAP_PARAM_KEYS, expand_gap
 
+# BEEHAVE weather/season parameters introduced for SETAC 2026. mc.xml requires all
+# of them in every .xrun; when the client does not send them we copy the defaults
+# from xPollinator's template.xrun (Rothamsted 2009 sunshine hours, HoPoMo season).
+WEATHER_PARAM_KEYS = [
+    "SunshineHours",
+    "SeasonHoPoMoRepX1", "SeasonHoPoMoRepX2", "SeasonHoPoMoRepX3",
+    "SeasonHoPoMoRepX4", "SeasonHoPoMoRepX5",
+]
+
 logger = logging.getLogger("simulation")
 
 # ---------------------------------------------------------------------------
@@ -87,7 +96,8 @@ def _generate_xrun_xml(params: dict) -> str:
         "SimID", "Project", "SimulationStart", "SimulationEnd",
         "NumberBeeHaveTimesteps", "BeeHaveMapCenterPointX", "BeeHaveMapCenterPointY",
         "NumberBeeHaveReplicates", "BeeHaveRandomSeed", "BeeHaveWeather",
-        "BeeHaveWeatherFile", "MinNumberApplications", "MaxNumberApplications",
+        "BeeHaveWeatherFile", *WEATHER_PARAM_KEYS,
+        "MinNumberApplications", "MaxNumberApplications",
         "RunLabel", "HiveGroupId", "NumberMC", "GAP", *GAP_PARAM_KEYS,
     ]
     for key in param_order:
@@ -98,6 +108,59 @@ def _generate_xrun_xml(params: dict) -> str:
 
     ET.indent(root, space="  ")
     return '<?xml version="1.0" encoding="utf-8"?>\n' + ET.tostring(root, encoding="unicode")
+
+
+_weather_defaults_cache: Optional[dict] = None
+
+
+def _template_weather_defaults() -> dict:
+    """Weather/season defaults read once from xPollinator/template.xrun."""
+    global _weather_defaults_cache
+    if _weather_defaults_cache is None:
+        defaults = {}
+        template = XPOLLINATOR_PATH / "template.xrun"
+        try:
+            root = ET.parse(template).getroot()
+            for key in WEATHER_PARAM_KEYS:
+                el = root.find(key)
+                if el is not None and el.text and el.text.strip():
+                    defaults[key] = " ".join(el.text.split())
+        except (OSError, ET.ParseError) as exc:
+            logger.warning("Could not read weather defaults from %s: %s", template, exc)
+        _weather_defaults_cache = defaults
+    return _weather_defaults_cache
+
+
+def apply_weather_defaults(params: dict) -> tuple[dict, Optional[str]]:
+    """Fill missing SunshineHours / SeasonHoPoMoRepX* from template.xrun.
+
+    Returns (params, error). SunshineHours, if given, must hold exactly 365 numbers.
+    """
+    merged = dict(params)
+    defaults = _template_weather_defaults()
+    for key in WEATHER_PARAM_KEYS:
+        value = merged.get(key)
+        if value is None or not str(value).strip():
+            if key in defaults:
+                merged[key] = defaults[key]
+    sunshine = merged.get("SunshineHours")
+    if sunshine is not None:
+        if isinstance(sunshine, (list, tuple)):
+            sunshine = " ".join(str(v) for v in sunshine)
+        values = str(sunshine).split()
+        try:
+            [float(v) for v in values]
+        except ValueError:
+            return merged, "SunshineHours must contain only numbers"
+        if len(values) != 365:
+            return merged, f"SunshineHours must contain 365 daily values, got {len(values)}"
+        merged["SunshineHours"] = " ".join(values)
+    missing = [key for key in WEATHER_PARAM_KEYS if merged.get(key) is None]
+    if missing:
+        return merged, (
+            "Missing weather parameters and no defaults in xPollinator/template.xrun: " + ", ".join(missing)
+        )
+    return merged, None
 
 
 def _validate_params(params: dict) -> Optional[str]:
@@ -242,6 +305,9 @@ def start_simulation(params: dict) -> tuple[Optional[str], Optional[str]]:
     Returns (job_id, None) on success or (None, error_message) on validation failure.
     """
     params, error = expand_gap(params)
+    if error:
+        return None, error
+    params, error = apply_weather_defaults(params)
     if error:
         return None, error
     error = _validate_params(params)
