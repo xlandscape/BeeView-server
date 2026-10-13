@@ -16,6 +16,7 @@ from shapely import wkt
 import os
 from sqlalchemy import text
 from database import get_session, engine
+from import_run import ensure_runs_schema
 from models import (
     Application,
     Base,
@@ -108,6 +109,12 @@ def startup_event():
     _initialize_database()
     # Build the simplified landscape GeoJSON off the request path. Until it is
     # ready, /geojson and /geojson/viewport wait for it (or fall back if it fails).
+    # Add Run columns introduced after the database was created (e.g. `gap`); idempotent.
+    _schema_session = next(get_session())
+    try:
+        ensure_runs_schema(_schema_session)
+    finally:
+        _schema_session.close()
     geometry_cache.start_background_build()
     forage_cache.start_background_build()
 
