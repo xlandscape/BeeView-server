@@ -69,10 +69,14 @@ def main() -> int:
             if answer != "y":
                 print("aborted")
                 return 1
+        # DuckDB checks foreign keys per statement and cannot see child deletes that are
+        # still uncommitted in the same transaction, so commit after the child tables.
         for run in runs:
-            session.execute(text("DELETE FROM bee_population_replicate WHERE run_id = :rid"), {"rid": run.id})
+            for child in ("bee_population_replicate", "applications"):
+                session.execute(text(f"DELETE FROM {child} WHERE run_id = :rid"), {"rid": run.id})
+            session.commit()
             session.execute(text("DELETE FROM runs WHERE id = :rid"), {"rid": run.id})
-        session.commit()
+            session.commit()
         print(f"deleted {len(runs)} run(s)")
         return 0
     finally:

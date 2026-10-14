@@ -27,10 +27,54 @@ import pandas as pd
 from sqlalchemy import text
 
 from database import Base, engine, get_session
-from models import BeePopulationReplicate, Run
+from models import Application, BeePopulationReplicate, Run
 from xml_parser import transform_coordinates_to_wgs84
 
 logger = logging.getLogger("import_run")
+
+
+def import_applications(session, run_id: int, mc_folder: Path) -> int:
+    """Store the rows of the MC folder's applications.txt for *run_id*; returns the count.
+
+    Columns: lulc_feature_id, application_day, conc_nectar, conc_pollen, contact.
+    """
+    candidates = [
+        mc_folder / "processing" / "BeeHave" / "applications.txt",
+        mc_folder / "processing" / "BeeHaveEcotox" / "applications.txt",
+        mc_folder / "BeeHaveEcotox" / "applications.txt",
+    ]
+    app_file = next((c for c in candidates if c.is_file()), None)
+    if app_file is None:
+        return 0
+    count = 0
+    with open(app_file, "r", encoding="utf-8") as fh:
+        for line in fh.readlines()[1:]:  # header: lulc_feature_id,application_day,conc_nectar,conc_pollen,contact
+            parts = line.strip().split(",")
+            if len(parts) < 5:
+                continue
+            try:
+                session.add(Application(
+                    run_id=run_id,
+                    lulc_feature_id=int(parts[0]),
+                    application_day=int(parts[1]),
+                    conc_nectar=float(parts[2]),
+                    conc_pollen=float(parts[3]),
+                    contact=float(parts[4]),
+                ))
+                count += 1
+            except ValueError:
+                continue
+    return count
+
+
+def delete_run_rows(session, run_id: int) -> None:
+    """Delete one run with its child rows. DuckDB validates foreign keys per statement
+    and does not see uncommitted child deletes, hence the commit in between."""
+    for child in ("bee_population_replicate", "applications"):
+        session.execute(text(f"DELETE FROM {child} WHERE run_id = :rid"), {"rid": run_id})
+    session.commit()
+    session.execute(text("DELETE FROM runs WHERE id = :rid"), {"rid": run_id})
+    session.commit()
 
 
 def _relative_source_path(folder: Path) -> Path:
@@ -252,13 +296,7 @@ def import_run(run_folder: Path, force: bool = False) -> list[int]:
             if existing_runs:
                 logger.info(f"--force: deleting {len(existing_runs)} existing run(s) with batch_sim_id={meta['sim_id']}")
                 for run in existing_runs:
-                    session.execute(
-                        text("DELETE FROM bee_population_replicate WHERE run_id = :rid"),
-                        {"rid": run.id},
-                    )
-                    session.commit()
-                    session.execute(text("DELETE FROM runs WHERE id = :rid"), {"rid": run.id})
-                    session.commit()
+                    delete_run_rows(session, run.id)
 
         imported_run_ids = []
         for outer_mc_id, mc_folder in enumerate(mc_folders):
@@ -325,11 +363,13 @@ def import_run(run_folder: Path, force: bool = False) -> list[int]:
                         timeseries=pickle.dumps(arr),
                     )
                 )
+            n_applications = import_applications(session, run.id, mc_folder)
             session.commit()
             imported_run_ids.append(run.id)
             logger.info(
                 f"Imported MC {outer_mc_id} for '{meta['sim_id']}' (run_id={run.id}): "
-                f"{n_replicates_actual} replicates x {len(STORED_METRIC_COLUMNS)} configured metrics"
+                f"{n_replicates_actual} replicates x {len(STORED_METRIC_COLUMNS)} configured metrics, "
+                f"{n_applications} applications"
             )
 
         return imported_run_ids
