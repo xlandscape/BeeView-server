@@ -240,9 +240,13 @@ def _validate_params(params: dict) -> Optional[str]:
 
 
 def _run_simulation(job: SimulationJob) -> None:
-    """Execute simulation subprocess and auto-import results. Runs in a thread."""
-    if job.status != JobStatus.QUEUED:
-        return  # cancelled between queueing and thread start
+    """Execute simulation subprocess and auto-import results. Runs in a thread.
+
+    The job is already marked RUNNING by _start_queued_jobs (under the lock), which
+    prevents a second thread from picking it up while this one is starting.
+    """
+    if job.status == JobStatus.CANCELLED:
+        return
     try:
         # Write .xrun file in project root (same location as template.xrun)
         xrun_content = _generate_xrun_xml(job.params)
@@ -252,7 +256,8 @@ def _run_simulation(job: SimulationJob) -> None:
         job.xrun_path = str(xrun_path)
 
         # Start subprocess with relative path (how xPollinator expects it)
-        job.status = JobStatus.RUNNING
+        if job.status == JobStatus.CANCELLED:
+            return
         job.started_at = time.time()
 
         cmd = [str(XPOLLINATOR_PYTHON), "-u", str(XPOLLINATOR_INIT), xrun_filename]
@@ -330,6 +335,9 @@ def _start_queued_jobs() -> None:
     with _lock:
         for job in _jobs.values():
             if job.status == JobStatus.QUEUED and _count_active() < MAX_CONCURRENT_JOBS:
+                # Claim the job before the thread runs: a second call (another job queued
+                # right after) must not start the same job twice.
+                job.status = JobStatus.RUNNING
                 thread = threading.Thread(target=_run_simulation, args=(job,), daemon=True)
                 thread.start()
 
