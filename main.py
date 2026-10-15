@@ -1877,7 +1877,7 @@ def api_compare_survival(
 # ---------------------------------------------------------------------------
 # Simulation Management API
 # ---------------------------------------------------------------------------
-from simulation import start_simulation, get_job, list_jobs, cancel_job
+from simulation import start_simulation, prepare_simulation, queue_simulation, get_job, list_jobs, cancel_job
 from scenarios import list_scenarios, get_scenario_bounds
 from gaps import list_gaps, get_gap, gap_parameter_info, add_gap, GAP_PARAM_KEYS
 from pydantic import BaseModel
@@ -2034,7 +2034,8 @@ def api_start_simulation(request: SimulationRequest):
         seen.add(tid)
         variants.append(t)
 
-    started = []
+    # Validate every variant before the first one is queued, so a bad entry rejects the whole set.
+    prepared = []
     for variant in variants:
         p = dict(params)
         for key in ("GAP", "MinNumberApplications", "MaxNumberApplications"):
@@ -2044,12 +2045,14 @@ def api_start_simulation(request: SimulationRequest):
         p["SimID"] = f"{base_sim_id}_{variant['id']}"
         p["RunLabel"] = p["SimID"]
         p["HiveGroupId"] = group_id
-        job_id, error = start_simulation(p)
+        p, error = prepare_simulation(p)
         if error:
-            for job in started:  # keep the set atomic
-                cancel_job(job["job_id"])
             raise HTTPException(status_code=400, detail=f"{variant['id']}: {error}")
-        started.append({"job_id": job_id, "sim_id": p["SimID"], "treatment": variant["id"]})
+        prepared.append((variant["id"], p))
+    started = [
+        {"job_id": queue_simulation(p), "sim_id": p["SimID"], "treatment": vid}
+        for vid, p in prepared
+    ]
     return {"job_id": started[0]["job_id"], "sim_id": base_sim_id, "jobs": started}
 
 

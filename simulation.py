@@ -241,6 +241,8 @@ def _validate_params(params: dict) -> Optional[str]:
 
 def _run_simulation(job: SimulationJob) -> None:
     """Execute simulation subprocess and auto-import results. Runs in a thread."""
+    if job.status != JobStatus.QUEUED:
+        return  # cancelled between queueing and thread start
     try:
         # Write .xrun file in project root (same location as template.xrun)
         xrun_content = _generate_xrun_xml(job.params)
@@ -336,31 +338,40 @@ def _start_queued_jobs() -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
-def start_simulation(params: dict) -> tuple[Optional[str], Optional[str]]:
-    """Start a new simulation job.
-    
-    Returns (job_id, None) on success or (None, error_message) on validation failure.
+def prepare_simulation(params: dict) -> tuple[dict, Optional[str]]:
+    """Expand the GAP preset, fill weather defaults and validate; returns (params, error).
+
+    Does not queue anything, so a set of runs can be validated completely before the
+    first job starts.
     """
     params, error = expand_gap(params)
     if error:
-        return None, error
+        return params, error
     params, error = apply_weather_defaults(params)
     if error:
-        return None, error
-    error = _validate_params(params)
-    if error:
-        return None, error
+        return params, error
+    return params, _validate_params(params)
 
+
+def queue_simulation(params: dict) -> str:
+    """Queue an already prepared parameter set and return the job id."""
     job_id = str(uuid.uuid4())[:8]
-    sim_id = params["SimID"]
-
-    job = SimulationJob(job_id=job_id, sim_id=sim_id, params=params)
-
+    job = SimulationJob(job_id=job_id, sim_id=params["SimID"], params=params)
     with _lock:
         _jobs[job_id] = job
-
     _start_queued_jobs()
-    return job_id, None
+    return job_id
+
+
+def start_simulation(params: dict) -> tuple[Optional[str], Optional[str]]:
+    """Prepare and queue a simulation job.
+
+    Returns (job_id, None) on success or (None, error_message) on validation failure.
+    """
+    params, error = prepare_simulation(params)
+    if error:
+        return None, error
+    return queue_simulation(params), None
 
 
 def get_job(job_id: str) -> Optional[SimulationJob]:
