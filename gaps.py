@@ -8,6 +8,7 @@ dict that the .xrun file needs.
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -60,6 +61,65 @@ def get_gap(gap_id: str) -> Optional[dict]:
         if gap.get("id") == gap_id:
             return gap
     return None
+
+
+_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,79}$")
+
+
+def validate_gap(preset: dict) -> Optional[str]:
+    """Return an error message when *preset* cannot be added to the catalog, else None."""
+    gap_id = str(preset.get("id") or "").strip()
+    if not _ID_PATTERN.match(gap_id):
+        return "id must be 2-80 characters of letters, digits, '_', '.', '-'"
+    if get_gap(gap_id) is not None:
+        return f"GAP '{gap_id}' exists already"
+    for key in ("label", "substance", "crop"):
+        if not str(preset.get(key) or "").strip():
+            return f"{key} is required"
+    params = preset.get("params") or {}
+    missing = [k for k in GAP_PARAM_KEYS if k not in params]
+    unknown = [k for k in params if k not in GAP_PARAM_KEYS]
+    if missing:
+        return "missing parameters: " + ", ".join(missing)
+    if unknown:
+        return "unknown parameters: " + ", ".join(unknown)
+    for key, value in params.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return f"{key} must be a number"
+    if int(params["FirstDayOfYearApplications"]) > int(params["LastDayOfYearApplications"]):
+        return "FirstDayOfYearApplications must be <= LastDayOfYearApplications"
+    return None
+
+
+def add_gap(preset: dict) -> dict:
+    """Append a validated preset to gaps.json, keeping the file's formatting; returns the stored entry."""
+    error = validate_gap(preset)
+    if error:
+        raise ValueError(error)
+    entry = {
+        "id": preset["id"].strip(),
+        "label": preset["label"].strip(),
+        "substance": preset["substance"].strip(),
+        "crop": preset["crop"].strip(),
+        "source": str(preset.get("source") or "").strip(),
+        "notes": str(preset.get("notes") or "").strip(),
+        "params": {key: preset["params"][key] for key in GAP_PARAM_KEYS},
+    }
+    text = GAPS_FILE.read_text(encoding="utf-8")
+    tail = "  ]\n}"
+    if not text.rstrip().endswith(tail.strip()) or text.count(tail) != 1:
+        raise ValueError(f"{GAPS_FILE} does not end with the expected catalog closing")
+    body = json.dumps(entry, indent=2, ensure_ascii=False)
+    body = "\n".join("    " + line for line in body.splitlines())
+    head = text[: text.rindex(tail)].rstrip()
+    if not head.endswith("}"):
+        raise ValueError("unexpected catalog layout before the closing bracket")
+    new_text = head + ",\n" + body + "\n" + tail + "\n"
+    json.loads(new_text)  # must stay valid
+    GAPS_FILE.write_text(new_text, encoding="utf-8")
+    _cache["catalog"] = None  # force reload
+    logger.info("Added GAP preset %s to %s", entry["id"], GAPS_FILE)
+    return entry
 
 
 def expand_gap(params: dict) -> tuple[dict, Optional[str]]:

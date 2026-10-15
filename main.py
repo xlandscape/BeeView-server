@@ -1879,9 +1879,19 @@ def api_compare_survival(
 # ---------------------------------------------------------------------------
 from simulation import start_simulation, get_job, list_jobs, cancel_job
 from scenarios import list_scenarios, get_scenario_bounds
-from gaps import list_gaps, get_gap, gap_parameter_info
+from gaps import list_gaps, get_gap, gap_parameter_info, add_gap, GAP_PARAM_KEYS
 from pydantic import BaseModel
 from typing import Optional
+
+
+class TreatmentSpec(BaseModel):
+    """One treated variant of a simulation set (see SimulationRequest.Treatments)."""
+    id: str
+    GAP: Optional[str] = None
+    MinNumberApplications: int = 1
+    MaxNumberApplications: int = 1
+    # Per-variant overrides of GAP parameters (keys as in /api/gaps parameters).
+    Params: Optional[dict[str, float]] = None
 
 
 class SimulationRequest(BaseModel):
@@ -1929,12 +1939,37 @@ class SimulationRequest(BaseModel):
     ForagerContactSlope: Optional[float] = None
     LarvaeOralLD50: Optional[float] = None
     LarvaeOralSlope: Optional[float] = None
+    # Optional treatment set: one untreated run plus one run per entry, all sharing
+    # HiveGroupId (= SimID); SimIDs become "<SimID>_untreated", "<SimID>_<id>".
+    Treatments: Optional[list[TreatmentSpec]] = None
+
+
+class GapPresetIn(BaseModel):
+    id: str
+    label: str
+    substance: str
+    crop: str
+    source: str = ""
+    notes: str = ""
+    params: dict[str, float]
 
 
 @app.get("/api/gaps")
 def api_list_gaps():
     """List GAP presets (substance toxicity + crop exposure bundles) available for simulations."""
     return {"parameters": gap_parameter_info(), "gaps": list_gaps()}
+
+
+@app.post("/api/gaps", status_code=201)
+def api_add_gap(preset: GapPresetIn):
+    """Add a GAP preset to xPollinator's model/variant/gaps.json (all parameters required)."""
+    try:
+        entry = add_gap(preset.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not write the GAP catalog: {exc}")
+    return entry
 
 
 @app.get("/api/gaps/{gap_id}")
@@ -1963,18 +1998,59 @@ def api_scenario_bounds(folder_name: str):
 
 @app.post("/api/simulate")
 def api_start_simulation(request: SimulationRequest):
-    """Start a new xPollinator simulation."""
-    params = request.model_dump(exclude_none=True)
-    # Use SimID as RunLabel if not provided
-    if not params.get("RunLabel"):
-        params["RunLabel"] = params["SimID"]
-    if not params.get("HiveGroupId"):
-        params["HiveGroupId"] = params["SimID"]
+    """Start a new xPollinator simulation, or a treatment set when Treatments is given.
 
-    job_id, error = start_simulation(params)
-    if error:
-        raise HTTPException(status_code=400, detail=error)
-    return {"job_id": job_id, "sim_id": params["SimID"]}
+    Single run: returns {"job_id", "sim_id"}. Treatment set: one job for the untreated
+    run (0 applications, the request's GAP for the toxicity parameters) plus one per
+    treatment; returns {"job_id", "sim_id", "jobs": [{"job_id", "sim_id", "treatment"}]}.
+    """
+    params = request.model_dump(exclude_none=True)
+    treatments = params.pop("Treatments", None)
+    if not treatments:
+        if not params.get("RunLabel"):
+            params["RunLabel"] = params["SimID"]
+        if not params.get("HiveGroupId"):
+            params["HiveGroupId"] = params["SimID"]
+        job_id, error = start_simulation(params)
+        if error:
+            raise HTTPException(status_code=400, detail=error)
+        return {"job_id": job_id, "sim_id": params["SimID"]}
+
+    base_sim_id = params["SimID"]
+    group_id = params.get("HiveGroupId") or base_sim_id
+    variants = [{"id": "untreated", "GAP": params.get("GAP"), "MinNumberApplications": 0, "MaxNumberApplications": 0}]
+    seen = {"untreated"}
+    for t in treatments:
+        tid = (t.get("id") or "").strip()
+        if not tid or tid in seen or "/" in tid or "\\" in tid or " " in tid:
+            raise HTTPException(status_code=400, detail=f"Invalid or duplicate treatment id: {tid!r}")
+        if int(t.get("MaxNumberApplications", 0)) < 1:
+            raise HTTPException(status_code=400, detail=f"Treatment {tid!r} needs MaxNumberApplications >= 1")
+        if int(t.get("MinNumberApplications", 0)) > int(t["MaxNumberApplications"]):
+            raise HTTPException(status_code=400, detail=f"Treatment {tid!r}: MinNumberApplications > MaxNumberApplications")
+        unknown = [k for k in (t.get("Params") or {}) if k not in GAP_PARAM_KEYS]
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"Treatment {tid!r}: unknown parameters {', '.join(unknown)}")
+        seen.add(tid)
+        variants.append(t)
+
+    started = []
+    for variant in variants:
+        p = dict(params)
+        for key in ("GAP", "MinNumberApplications", "MaxNumberApplications"):
+            if variant.get(key) is not None:
+                p[key] = variant[key]
+        p.update(variant.get("Params") or {})
+        p["SimID"] = f"{base_sim_id}_{variant['id']}"
+        p["RunLabel"] = p["SimID"]
+        p["HiveGroupId"] = group_id
+        job_id, error = start_simulation(p)
+        if error:
+            for job in started:  # keep the set atomic
+                cancel_job(job["job_id"])
+            raise HTTPException(status_code=400, detail=f"{variant['id']}: {error}")
+        started.append({"job_id": job_id, "sim_id": p["SimID"], "treatment": variant["id"]})
+    return {"job_id": started[0]["job_id"], "sim_id": base_sim_id, "jobs": started}
 
 
 @app.get("/api/simulate/jobs")
