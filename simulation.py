@@ -323,6 +323,9 @@ def _run_simulation(job: SimulationJob) -> None:
                 Path(job.xrun_path).unlink()
         except OSError:
             pass
+        # This job no longer counts as active: start the next queued one (treatment sets,
+        # several submissions) instead of waiting for the next POST /api/simulate.
+        _start_queued_jobs()
 
 
 def _count_active() -> int:

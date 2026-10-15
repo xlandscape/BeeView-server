@@ -83,7 +83,10 @@ Returns the beehive location from the template.xrun file (legacy, used for singl
 
 Lists all imported runs with their metadata.
 
-**Response:** `{ "runs": [{ "id": 1, "sim_id": "hive01_MC0", "hive_group_id": "hive01", "treatment_on": false, ... }, ...] }`
+**Response:** `{ "runs": [{ "id": 1, "sim_id": "hive01_MC0", "hive_group_id": "hive01", "treatment_on": false, "gap": "thiacloprid_apple_EU_120", ... }, ...] }`
+
+`gap` is the GAP preset id recorded from the run's `.xrun` file (`null` for runs imported before presets existed).
+Several treated runs per hive are told apart by it.
 
 ### `GET /api/bee-population/timeseries`
 
@@ -170,6 +173,39 @@ Matrix values are in **percent** (e.g. `12.1` = 12.1% reduction). Positive = tre
 Legacy endpoint returning exceedance-fraction percentiles with a threshold parameter.
 
 **Parameters:** Same as reduction-matrix, plus `threshold` (float) and `mode` (`decline`/`absolute`).
+
+## Simulation endpoints
+
+### `GET /api/scenarios`
+
+Scenarios found in xPollinator's `scenario/` folder. Each entry carries `sunshine_hours` (`{file, description}` of the
+scenario's `weather/sunshine_hours.txt`, or `null` when the Rothamsted 2009 series is the default).
+
+### `GET /api/gaps`, `GET /api/gaps/{gap_id}`
+
+GAP presets from xPollinator's `model/variant/gaps.json`: `{ "parameters": {key: {unit, description}}, "gaps": [...] }`.
+
+### `POST /api/gaps`
+
+Appends a preset to `gaps.json`. Body: `{ "id", "label", "substance", "crop", "source", "notes", "params": {all 18 keys} }`.
+Returns `201` with the stored entry, `400` on a duplicate id, missing or unknown parameters.
+
+### `POST /api/simulate`
+
+Starts an xPollinator run. Body: `SimulationRequest` (scenario, hive position, dates, replicates, `NumberMC`, seed,
+weather, `GAP` and optional individual parameter overrides, `SunshineHours` / `SeasonHoPoMoRepX1..5` with scenario
+or template defaults).
+
+With `"Treatments": [{ "id", "GAP", "MinNumberApplications", "MaxNumberApplications", "Params": {overrides} }, ...]`
+the server queues one untreated run (0 applications, the request's `GAP` for the toxicity values) plus one run per
+treatment. All runs share `HiveGroupId` (= `SimID`); their SimIDs are `<SimID>_untreated` and `<SimID>_<id>`. The set
+is validated completely before the first job is queued.
+
+**Response:** `{ "job_id", "sim_id" }`, plus `"jobs": [{ "job_id", "sim_id", "treatment" }]` for a set.
+
+### `GET /api/simulate/jobs`, `GET /api/simulate/jobs/{job_id}`, `DELETE /api/simulate/jobs/{job_id}`
+
+Job list, single job and cancel. Finished jobs are imported automatically (`MAX_CONCURRENT_JOBS`, default 1).
 
 ## Notes
 
