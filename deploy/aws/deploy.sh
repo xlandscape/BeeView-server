@@ -42,8 +42,12 @@ upload() {
     --exclude=BeeView-server/experiments --exclude=BeeView-server/BeeView-portable \
     --exclude="*/__pycache__" --exclude="BeeView-server/*.log" --exclude="BeeView-server/*.png" \
     --exclude=BeeView-server/nul --exclude=BeeView-server/.claude BeeView-server
-  echo "packaging data"
-  tar -a -cf "$WORK/data.zip" -C "$ROOT/BeeView-server" --exclude="data/beeview_backup_*" data
+  echo "packaging data (stop the local BeeView server first: DuckDB holds an exclusive lock)"
+  rm -rf "$WORK/data" && mkdir -p "$WORK/data"
+  cp "$ROOT/BeeView-server/data/beeview.duckdb" "$WORK/data/" || { echo "beeview.duckdb is locked, stop the server and retry"; exit 1; }
+  cp "$ROOT/BeeView-server/data/arr.dat" "$ROOT/BeeView-server/data/"*.csv "$ROOT/BeeView-server/data/"Tarn_LULC_v04.* "$WORK/data/"
+  cp -r "$ROOT/BeeView-server/data/cache" "$WORK/data/"
+  tar -a -cf "$WORK/data.zip" -C "$WORK" data
   # python-3.11-amd64.exe is optional here: bootstrap.ps1 downloads and signature-checks it on the instance when absent.
   for f in xpollinator.zip beeview-server.zip data.zip; do
     aws s3 cp "$WORK/$f" "s3://$BUCKET/$PREFIX/$f" --only-show-errors

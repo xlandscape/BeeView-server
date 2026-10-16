@@ -273,7 +273,7 @@ Resources:
   SnapshotPolicy:
     Type: AWS::DLM::LifecyclePolicy
     Properties:
-      Description: Daily snapshots of the BeeView instance, 7 kept
+      Description: Daily snapshots of the BeeView instance - 7 kept
       State: ENABLED
       ExecutionRoleArn: !GetAtt DlmRole.Arn
       PolicyDetails:
