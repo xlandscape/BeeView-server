@@ -1,0 +1,316 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  BeeView + xPollinator on one Windows EC2 instance behind an internal Application Load
+  Balancer with TLS (ACM) and optional Entra ID (OIDC) authentication. Bayer SMART AWS
+  pattern: no public IP, instance in a private subnet, ALB in private subnets, SSM only.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Two private subnets (ALB needs two AZs; the instance uses the first).
+  InstanceType:
+    Type: String
+    Default: m6i.2xlarge
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: Sanctioned Bayer Windows Server 2022 AMI (owner 905084838059, bay-windows-2022_*).
+  VolumeSizeGb:
+    Type: Number
+    Default: 200
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+  DomainName:
+    Type: String
+    Default: beeview.414678956813.cloud.bayer.com
+  DeployBucket:
+    Type: String
+    Description: S3 bucket holding bootstrap.ps1 and the application archives.
+  ArtifactPrefix:
+    Type: String
+    Default: v1
+    Description: Key prefix in DeployBucket (bootstrap.ps1, xpollinator.zip, beeview-server.zip, data.zip, python installer).
+  AllowedCidrs:
+    Type: CommaDelimitedList
+    Default: "10.0.0.0/8"
+    Description: Client networks allowed to reach the ALB (Bayer internal ranges).
+  AuthMode:
+    Type: String
+    Default: none
+    AllowedValues: [none, oidc]
+    Description: oidc = authenticate users against Entra ID before forwarding (needs OidcSecretName).
+  OidcSecretName:
+    Type: String
+    Default: beeview/entra-oidc
+    Description: Secrets Manager secret with keys client_id and client_secret.
+  EntraTenantId:
+    Type: String
+    Default: fcb2b37b-5da0-466b-9b83-0014b67a7c78
+  MaxConcurrentJobs:
+    Type: Number
+    Default: 2
+
+Conditions:
+  UseOidc: !Equals [!Ref AuthMode, oidc]
+
+Resources:
+  # ------------------------------------------------------------------ security groups
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: BeeView internal ALB, HTTPS from Bayer networks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Select [0, !Ref AllowedCidrs]
+          Description: HTTPS from Bayer network
+      Tags:
+        - Key: Name
+          Value: beeview-alb
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: BeeView instance, app port from the ALB only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 32000
+          ToPort: 32000
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+          Description: BeeView-server from ALB
+      Tags:
+        - Key: Name
+          Value: beeview-instance
+
+  # ------------------------------------------------------------------ IAM
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: beeview-deploy-artifacts
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:ListBucket]
+                Resource:
+                  - !Sub arn:aws:s3:::${DeployBucket}
+                  - !Sub arn:aws:s3:::${DeployBucket}/*
+              - Effect: Allow
+                Action: [s3:PutObject]
+                Resource: !Sub arn:aws:s3:::${DeployBucket}/backups/*
+      Tags:
+        - Key: Name
+          Value: beeview-instance-role
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  # ------------------------------------------------------------------ certificate + DNS
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+      Tags:
+        - Key: Name
+          Value: beeview
+
+  DnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt LoadBalancer.DNSName
+        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+        EvaluateTargetHealth: false
+
+  # ------------------------------------------------------------------ instance
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      SubnetId: !Select [0, !Ref PrivateSubnetIds]
+      SecurityGroupIds: [!Ref InstanceSecurityGroup]
+      IamInstanceProfile: !Ref InstanceProfile
+      EbsOptimized: true
+      Monitoring: false
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref VolumeSizeGb
+            Encrypted: true
+            DeleteOnTermination: true
+      MetadataOptions:
+        HttpTokens: required
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          $ErrorActionPreference = "Stop"
+          $log = "C:\xLandscape\logs\userdata.log"
+          New-Item -ItemType Directory -Force -Path (Split-Path $log) | Out-Null
+          Start-Transcript -Path $log -Append
+          [System.Environment]::SetEnvironmentVariable("BEEVIEW_DEPLOY_BUCKET", "${DeployBucket}", "Machine")
+          [System.Environment]::SetEnvironmentVariable("BEEVIEW_ARTIFACT_PREFIX", "${ArtifactPrefix}", "Machine")
+          [System.Environment]::SetEnvironmentVariable("MAX_CONCURRENT_JOBS", "${MaxConcurrentJobs}", "Machine")
+          $bootstrap = "C:\xLandscape\bootstrap.ps1"
+          $cli = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+          if (Test-Path $cli) { & $cli s3 cp "s3://${DeployBucket}/${ArtifactPrefix}/bootstrap.ps1" $bootstrap --region ${AWS::Region} --only-show-errors }
+          else { Import-Module AWSPowerShell; Read-S3Object -BucketName "${DeployBucket}" -Key "${ArtifactPrefix}/bootstrap.ps1" -File $bootstrap -Region ${AWS::Region} | Out-Null }
+          powershell.exe -ExecutionPolicy Bypass -File $bootstrap
+          Stop-Transcript
+          </powershell>
+          <persist>false</persist>
+      Tags:
+        - Key: Name
+          Value: beeview
+        - Key: Backup
+          Value: beeview
+        - Key: PatchGroup
+          Value: beeview
+
+  # ------------------------------------------------------------------ load balancer
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: beeview
+      Scheme: internal
+      Type: application
+      Subnets: !Ref PrivateSubnetIds
+      SecurityGroups: [!Ref AlbSecurityGroup]
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: "300"
+      Tags:
+        - Key: Name
+          Value: beeview
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: beeview
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: 32000
+      TargetType: instance
+      Targets:
+        - Id: !Ref Instance
+          Port: 32000
+      HealthCheckPath: /api/geojson/cache-status
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      Matcher: { HttpCode: "200" }
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: "30"
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates:
+        - CertificateArn: !Ref Certificate
+      DefaultActions: !If
+        - UseOidc
+        - - Type: authenticate-oidc
+            Order: 1
+            AuthenticateOidcConfig:
+              Issuer: !Sub https://login.microsoftonline.com/${EntraTenantId}/v2.0
+              AuthorizationEndpoint: !Sub https://login.microsoftonline.com/${EntraTenantId}/oauth2/v2.0/authorize
+              TokenEndpoint: !Sub https://login.microsoftonline.com/${EntraTenantId}/oauth2/v2.0/token
+              UserInfoEndpoint: https://graph.microsoft.com/oidc/userinfo
+              ClientId: !Sub "{{resolve:secretsmanager:${OidcSecretName}:SecretString:client_id}}"
+              ClientSecret: !Sub "{{resolve:secretsmanager:${OidcSecretName}:SecretString:client_secret}}"
+              Scope: openid offline_access
+              SessionTimeout: 43200
+              OnUnauthenticatedRequest: authenticate
+          - Type: forward
+            Order: 2
+            TargetGroupArn: !Ref TargetGroup
+        - - Type: forward
+            TargetGroupArn: !Ref TargetGroup
+
+  # ------------------------------------------------------------------ backups + patching
+  DlmRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: dlm.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole
+
+  SnapshotPolicy:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: Daily snapshots of the BeeView instance, 7 kept
+      State: ENABLED
+      ExecutionRoleArn: !GetAtt DlmRole.Arn
+      PolicyDetails:
+        PolicyType: EBS_SNAPSHOT_MANAGEMENT
+        ResourceTypes: [INSTANCE]
+        TargetTags:
+          - Key: Backup
+            Value: beeview
+        Schedules:
+          - Name: daily
+            CreateRule:
+              Interval: 24
+              IntervalUnit: HOURS
+              Times: ["02:00"]
+            RetainRule:
+              Count: 7
+            CopyTags: true
+
+  PatchAssociation:
+    Type: AWS::SSM::Association
+    Properties:
+      AssociationName: beeview-weekly-patch
+      Name: AWS-RunPatchBaseline
+      ScheduleExpression: cron(0 3 ? * SUN *)
+      Parameters:
+        Operation: [Install]
+        RebootOption: [RebootIfNeeded]
+      Targets:
+        - Key: tag:PatchGroup
+          Values: [beeview]
+
+Outputs:
+  Url:
+    Value: !Sub https://${DomainName}
+  LoadBalancerDns:
+    Value: !GetAtt LoadBalancer.DNSName
+  InstanceId:
+    Value: !Ref Instance
+  CertificateArn:
+    Value: !Ref Certificate
