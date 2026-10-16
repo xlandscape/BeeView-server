@@ -4,7 +4,7 @@ h5py
 numpy
 geopandas
 shapely
-sqlalchemy>=2.0.0
+sqlalchemy[asyncio]>=2.0.0
 duckdb==1.3.2
 duckdb-engine==0.17.0
 pandas
@@ -12,3 +12,4 @@ python-multipart
 lxml
 pyproj
 fiona
+greenlet
