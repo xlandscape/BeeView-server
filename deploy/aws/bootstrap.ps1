@@ -35,6 +35,14 @@ function Get-Artifact($key, $file) {
     }
 }
 
+# Expand-Archive (.NET Framework ZipArchive) rejects the ZIP64 archives that bsdtar writes for
+# the 1.3 GB xPollinator tree; Windows Server 2022 ships bsdtar as tar.exe, which reads them.
+function Expand-Zip($zip, $dest) {
+    New-Item -ItemType Directory -Force -Path $dest | Out-Null
+    & "$env:SystemRoot\System32\tar.exe" -xf $zip -C $dest
+    if ($LASTEXITCODE -ne 0) { throw "extraction of $zip failed" }
+}
+
 # ---------------------------------------------------------------- stop a running service
 $taskName = "BeeViewServer"
 if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
@@ -64,7 +72,7 @@ foreach ($name in @("xpollinator", "beeview-server", "data")) {
 $xp = "$root\xPollinator"
 if (Test-Path "$xp\run") { Move-Item "$xp\run" "$root\xPollinator_run_keep" -Force }
 if (Test-Path $xp) { Remove-Item $xp -Recurse -Force }
-Expand-Archive "$staging\xpollinator.zip" -DestinationPath $root -Force
+Expand-Zip "$staging\xpollinator.zip" $root
 if (Test-Path "$root\xPollinator_run_keep") { Move-Item "$root\xPollinator_run_keep" "$xp\run" -Force } else { New-Item -ItemType Directory -Force -Path "$xp\run" | Out-Null }
 
 # BeeView-server: replace code, keep data/ and venv/
@@ -73,11 +81,11 @@ $keepData = Test-Path "$srv\data\beeview.duckdb"
 if ($keepData) { Move-Item "$srv\data" "$root\BeeView_data_keep" -Force }
 if (Test-Path "$srv\venv") { Move-Item "$srv\venv" "$root\BeeView_venv_keep" -Force }
 if (Test-Path $srv) { Remove-Item $srv -Recurse -Force }
-Expand-Archive "$staging\beeview-server.zip" -DestinationPath $root -Force
+Expand-Zip "$staging\beeview-server.zip" $root
 if ($keepData) {
     Move-Item "$root\BeeView_data_keep" "$srv\data" -Force
 } else {
-    Expand-Archive "$staging\data.zip" -DestinationPath $srv -Force   # creates $srv\data
+    Expand-Zip "$staging\data.zip" $srv   # creates $srv\data
 }
 if (Test-Path "$root\BeeView_venv_keep") { Move-Item "$root\BeeView_venv_keep" "$srv\venv" -Force }
 
