@@ -15,6 +15,7 @@ exp1 = untreated, exp4 = treated.
 Usage:
     python import_all_experiments.py [--force] [-v]
 """
+from typing import Optional
 import argparse
 import logging
 import pickle
@@ -94,7 +95,7 @@ def import_experiment_folder(
     mc_num: int,
     force: bool,
     session,
-) -> int | None:
+) -> Optional[int]:
     """Import a single experiment folder as one Run.
 
     Returns the new Run.id, or None if skipped.

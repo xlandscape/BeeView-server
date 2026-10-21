@@ -3,6 +3,7 @@
 Load bee population data from output.csv into the database
 """
 
+from typing import Optional
 import pandas as pd
 import pickle
 import numpy as np
@@ -44,7 +45,7 @@ DERIVED_METRICS = {
 OPTIONAL_DIRECT_METRICS = ["HoneyEnergyStore", "PollenStore_g"]
 
 
-def _metric_array(df: pd.DataFrame, metric_name: str) -> np.ndarray | None:
+def _metric_array(df: pd.DataFrame, metric_name: str) -> Optional[np.ndarray]:
     """Return metric array from a direct column or a derived formula."""
     if metric_name in df.columns:
         return df[metric_name].to_numpy(dtype=np.float64)

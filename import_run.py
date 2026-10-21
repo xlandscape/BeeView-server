@@ -13,6 +13,7 @@ Writes:
 
 Pass --force to replace an existing run with the same SimID.
 """
+from typing import Optional
 import argparse
 import glob
 import logging
@@ -153,7 +154,7 @@ def ensure_runs_schema(session) -> None:
         session.commit()
 
 
-def _text(root: ET.Element, tag: str, default: str | None = None) -> str | None:
+def _text(root: ET.Element, tag: str, default: Optional[str] = None) -> Optional[str]:
     el = root.find(tag)
     if el is None or el.text is None:
         return default
@@ -211,7 +212,7 @@ def _normalize(name: str) -> str:
     return " ".join(name.split())
 
 
-def _extract_metric_array(group_sorted: pd.DataFrame, metric_name: str) -> np.ndarray | None:
+def _extract_metric_array(group_sorted: pd.DataFrame, metric_name: str) -> Optional[np.ndarray]:
     """Return one metric's timeseries as float64 array from direct or derived columns."""
     normalized_to_actual = {_normalize(col): col for col in group_sorted.columns}
     metric_normalized = _normalize(metric_name)

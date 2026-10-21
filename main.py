@@ -1,3 +1,4 @@
+from typing import Optional, Union, List
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -307,7 +308,7 @@ _VEG_MAPPING_QUERY = text("""
     WHERE f.feature_id IS NOT NULL
     ORDER BY f.feature_id
 """)
-_veg_mapping_cache: dict | None = None
+_veg_mapping_cache: Optional[dict] = None
 _veg_mapping_lock = threading.Lock()
 
 
@@ -1272,7 +1273,7 @@ def get_bee_population_metrics():
         session.close()
 
 @app.get("/api/applications")
-def get_applications(feature_ids: str = None, run_id: int | None = None):
+def get_applications(feature_ids: str = None, run_id: Optional[int] = None):
     """
     Get plant protection product application data.
 
@@ -1305,8 +1306,8 @@ def get_applications(feature_ids: str = None, run_id: int | None = None):
 @app.get("/api/exposure/timeseries")
 def get_exposure_timeseries(
     feature_ids: str = None,
-    run_id: int | None = None,
-    horizon_days: int | None = None,
+    run_id: Optional[int] = None,
+    horizon_days: Optional[int] = None,
 ):
     """
     Get exposure time series data for nectar, pollen, and contact values.
@@ -1356,7 +1357,7 @@ def _parse_feature_ids(feature_ids: str) -> list[int]:
     return [int(fid.strip()) for fid in feature_ids.split(',') if fid.strip()]
 
 
-def _load_applications(session, run_id: int | None) -> list[dict]:
+def _load_applications(session, run_id: Optional[int]) -> list[dict]:
     """Load applications from DB (preferred) or fall back to file resolution.
 
     Returns a list of dicts with keys: lulc_feature_id, application_day,
@@ -1412,7 +1413,7 @@ def _read_applications_file(applications_file: str) -> list[dict]:
     return applications
 
 
-def _resolve_applications_file(session, run_id: int | None) -> str | None:
+def _resolve_applications_file(session, run_id: Optional[int]) -> Optional[str]:
     """Resolve applications file path to the correct MC folder.
 
     Priority:
@@ -1462,9 +1463,9 @@ def _resolve_applications_file(session, run_id: int | None) -> str | None:
 
 def _resolve_exposure_horizon(
     session,
-    run_id: int | None,
+    run_id: Optional[int],
     applications: list[dict],
-    explicit_horizon: int | None,
+    explicit_horizon: Optional[int],
 ) -> int:
     if explicit_horizon is not None and explicit_horizon > 0:
         return explicit_horizon
@@ -1587,7 +1588,7 @@ def get_run(run_id: int):
 
 
 @app.get("/api/bee-population/replicates")
-def get_bee_population_replicates(run_id: int, metric: str | None = None):
+def get_bee_population_replicates(run_id: int, metric: Optional[str] = None):
     """Per-replicate colony time series for a run.
 
     Response shape:
@@ -1908,7 +1909,7 @@ class SimulationRequest(BaseModel):
     BeeHaveWeatherFile: Optional[str] = None
     # Daily sunshine hours (365 values, space-separated or list) and HoPoMo brood-season
     # shape; omitted values default to xPollinator/template.xrun (Rothamsted 2009).
-    SunshineHours: Optional[str | list[float]] = None
+    SunshineHours: Optional[Union[str, List[float]]] = None
     SeasonHoPoMoRepX1: Optional[int] = None
     SeasonHoPoMoRepX2: Optional[int] = None
     SeasonHoPoMoRepX3: Optional[int] = None
@@ -2100,4 +2101,4 @@ if os.path.isdir(FRONTEND_DIR) and os.path.isfile(os.path.join(FRONTEND_DIR, "in
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=32000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("BEEVIEW_PORT", "32000")))
