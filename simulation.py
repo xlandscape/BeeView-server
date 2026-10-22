@@ -91,9 +91,17 @@ _lock = threading.Lock()
 
 def _generate_xrun_xml(params: dict) -> str:
     """Generate .xrun XML content from parameter dict."""
+    # xLandscape core >= 1.19 renamed SimID to ExperimentID and Project to LandscapeScenario and
+    # requires both. SimID and Project stay: xPollinator's experiment.xml names the run folder after
+    # SimID, and the importer reads SimID/Project from the .xrun copy in the run folder.
+    params = {
+        **params,
+        "ExperimentID": params.get("ExperimentID") or params.get("SimID"),
+        "LandscapeScenario": params.get("LandscapeScenario") or params.get("Project"),
+    }
     root = ET.Element("Parameters")
     param_order = [
-        "SimID", "Project", "SimulationStart", "SimulationEnd",
+        "SimID", "ExperimentID", "Project", "LandscapeScenario", "SimulationStart", "SimulationEnd",
         "NumberBeeHaveTimesteps", "BeeHaveMapCenterPointX", "BeeHaveMapCenterPointY",
         "NumberBeeHaveReplicates", "BeeHaveRandomSeed", "BeeHaveWeather",
         "BeeHaveWeatherFile", *WEATHER_PARAM_KEYS,
