@@ -43,7 +43,7 @@ from database import get_session
 
 logger = logging.getLogger(__name__)
 
-CACHE_FORMAT_VERSION = 2
+CACHE_FORMAT_VERSION = 3  # 3: area_hectares recomputed in an equal-area CRS (was EPSG:3857)
 
 SIMPLIFY_TOLERANCE = float(os.getenv("GEOJSON_SIMPLIFY_TOLERANCE", "0.00001"))
 PRECISION = int(os.getenv("GEOJSON_PRECISION", "6"))

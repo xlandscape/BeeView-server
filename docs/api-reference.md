@@ -118,6 +118,27 @@ Returns pesticide application events for a run.
 | `run_id` | int | Run ID (reads from `applications` table; falls back to legacy file lookup if DB rows are missing) |
 | `feature_ids` | string | Comma-separated feature IDs to filter by |
 
+### `GET /api/features/{feature_id}/applications`
+
+Returns the application events of one landscape feature across runs (used by the parcel popup). Implemented in `feature_api.py`; reads the `applications` table only, so legacy file-based runs yield an empty list.
+
+**Parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `feature_id` | int | Path parameter: shapefile feature id (same as `/geojson` feature ids) |
+| `run_ids` | string | Comma-separated run ids (optional; omit for all runs). Invalid values give `422`. |
+
+**Response:** a JSON array ordered by run id, then application day:
+
+```json
+[
+  { "run_id": 12, "application_day": 101, "conc_nectar": 2473.0, "conc_pollen": 68482.0, "contact": 0.8 }
+]
+```
+
+`conc_nectar` / `conc_pollen` are residue concentrations in µg/kg, `contact` is the contact dose in kg/ha, as in `applications.txt`.
+
 ### `GET /api/exposure/timeseries`
 
 Returns daily exposure time series computed from application events.

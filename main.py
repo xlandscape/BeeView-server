@@ -95,6 +95,9 @@ app.add_middleware(
 # body with Content-Encoding already set, which this middleware passes through.
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=6)
 
+from feature_api import router as feature_router  # noqa: E402
+app.include_router(feature_router)
+
 
 @app.middleware("http")
 async def static_cache_headers(request: Request, call_next):

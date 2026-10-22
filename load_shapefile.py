@@ -24,6 +24,27 @@ def strip_z_from_geom(geom):
         return MultiPolygon(polygons)
     return geom
 
+def area_crs_for(gdf: "gpd.GeoDataFrame") -> str:
+    """CRS used for area computation: local UTM zone if it can be estimated, else EPSG:6933 (equal-area)."""
+    try:
+        utm = gdf.estimate_utm_crs()
+        if utm is not None:
+            return utm.to_string()
+    except Exception as exc:  # pragma: no cover - depends on data extent
+        logger.warning(f"Could not estimate UTM zone ({exc}); using EPSG:6933")
+    return "EPSG:6933"
+
+
+def equal_area_hectares(gdf: "gpd.GeoDataFrame") -> "np.ndarray":
+    """Polygon areas in hectares computed in an (almost) equal-area projected CRS."""
+    if gdf.crs is None:
+        logger.warning("GeoDataFrame has no CRS; assuming coordinates are metres")
+        return gdf.geometry.area.to_numpy() / 10000
+    crs = area_crs_for(gdf)
+    logger.info(f"Computing areas in {crs}")
+    return gdf.to_crs(crs).geometry.area.to_numpy() / 10000
+
+
 def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 1000, beehive_radius_km: float = None):
     gdf = gpd.read_file(shapefile_path)
     logger.info(f"Shapefile CRS: {gdf.crs}")
@@ -62,15 +83,10 @@ def load_shapefile_to_db(shapefile_path: str, db_session, subset_size: int = 100
         logger.info(f"Number of geometries is {len(gdf)}. Selecting random subset of size {subset_size}")
         gdf = gdf.sample(n=subset_size, random_state=None)
 
-    # Calculate areas in hectares for area-based analysis
-    # Convert to a projected CRS for accurate area calculation if needed
-    if gdf.crs and gdf.crs.is_geographic:
-        logger.info("Converting to projected CRS for area calculation")
-        gdf_area = gdf.to_crs('EPSG:3857')  # Web Mercator for area calculation
-        gdf['area_hectares'] = gdf_area.geometry.area / 10000  # Convert m² to hectares
-    else:
-        # Assume the CRS units are already in meters
-        gdf['area_hectares'] = gdf.geometry.area / 10000  # Convert to hectares
+    # Calculate areas in hectares for area-based analysis.
+    # Web Mercator (EPSG:3857) is NOT suitable: its area scale is 1/cos²(lat), i.e. +94 % at 44° N.
+    # Use the local UTM zone (true-to-scale within ~0.1 %) with a cylindrical equal-area fallback.
+    gdf['area_hectares'] = equal_area_hectares(gdf)
     
     logger.info(f"Area calculation completed. Sample areas: {gdf['area_hectares'].head().tolist()}")
 
