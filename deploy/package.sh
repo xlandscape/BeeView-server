@@ -6,7 +6,8 @@
 #
 # Output (input for deploy/windows/install.ps1 and for deploy/aws/deploy.sh upload):
 #   xpollinator.zip     xPollinator HEAD + submodules model/core and model/variant/BeeHaveEcotox
-#                       + scenario/Scenario-TarnEtGaronne HEAD (bundled Python 3.9.7, JDK, NetLogo included)
+#                       + scenario/Scenario-TarnEtGaronne HEAD (bundled Python 3.9.7, NetLogo)
+#                       + jdk-24 Java runtime from the local working tree (not in git)
 #   beeview-server.zip  BeeView-server HEAD + frontend/ built from BeeView HEAD
 #   data.zip            data/ with beeview.duckdb (checkpointed copy), forage array, shapefile, caches
 #   wheels.zip          Python packages for requirements.txt (cp39, win_amd64) for an offline install
@@ -77,6 +78,13 @@ git -C "$XP/model/core" archive --format=tar --prefix=xPollinator/model/core/ HE
 git -C "$XP/model/variant/BeeHaveEcotox" archive --format=tar --prefix=xPollinator/model/variant/BeeHaveEcotox/ HEAD \
   | tar -x -C "$STAGE"
 git -C "$SCN" archive --format=tar --prefix=xPollinator/scenario/Scenario-TarnEtGaronne/ HEAD | tar -x -C "$STAGE"
+# The Java runtime of BeeHaveEcotox is not in git (.gitignore); it comes from the release download
+# https://xlandscape.org/releases/jdk-24-v1.0.zip and is taken from the local installation.
+JDK="$XP/model/variant/BeeHaveEcotox/jdk-24"
+[ -x "$JDK/bin/java.exe" ] || [ -x "$JDK/bin/java" ] || {
+  echo "ERROR: $JDK missing: extract https://xlandscape.org/releases/jdk-24-v1.0.zip into model/variant/BeeHaveEcotox"; exit 1; }
+cp -r "$JDK" "$STAGE/xPollinator/model/variant/BeeHaveEcotox/"
+echo "Java runtime: model/variant/BeeHaveEcotox/jdk-24 from https://xlandscape.org/releases/jdk-24-v1.0.zip" >> "$OUT/VERSIONS.txt"
 mkdir -p "$STAGE/xPollinator/run"
 cp "$OUT/VERSIONS.txt" "$STAGE/xPollinator/"
 (cd "$STAGE" && tar -a -cf "$OUT/xpollinator.zip" xPollinator)
