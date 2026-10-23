@@ -15,52 +15,27 @@ the Python 3.9.7 bundled with xPollinator (`model/core/bin/python-3.9.7-amd64`).
 kept compatible with Python 3.9 for this reason (no `X | Y` type annotations outside modules with
 `from __future__ import annotations`).
 
-### Build the artefacts (source machine)
+The complete installation and operation guide for the target machine, including the database
+export, is `deploy/windows/INSTALL.md`; it is shipped with every package.
+
+### Build the package (source machine)
 
 Stop the local BeeView server first (DuckDB holds an exclusive lock on `data/beeview.duckdb`), then:
 
 ```bash
-bash deploy/aws/deploy.sh package
+bash deploy/package.sh
 ```
 
-This writes to `../_deploy/`:
+The script packages the committed state of xPollinator (with the core and BeeHaveEcotox submodules and
+the Tarn-et-Garonne scenario), BeeView-server and a fresh BeeView frontend build, plus a checkpointed copy
+of the database and offline Python wheels, into `../_deploy/package/`: `xpollinator.zip`,
+`beeview-server.zip`, `data.zip`, `wheels.zip`, `install.ps1`, `INSTALL.md` and `VERSIONS.txt` (branch and
+commit of every repository). `deploy/aws/deploy.sh package` calls the same script.
 
-- `xpollinator.zip` (about 1.3 GB: model, bundled Python, JDK, NetLogo, scenarios, scripts)
-- `beeview-server.zip` (server code and built `frontend/`)
-- `data.zip` (`beeview.duckdb`, geometry and forage caches, shapefile, `arr.dat`, csv)
-- `install.ps1` (copy of `deploy/windows/install.ps1`)
+### Install, update, database
 
-Copy the four files to the target machine (USB, network share, SCP).
-
-### Install on the target machine
-
-In an elevated PowerShell, from the folder holding the files:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1
-```
-
-Options: `-Root C:\xLandscape` (install location), `-Port 32000`, `-MaxConcurrentJobs 2`,
-`-NoService` (no scheduled task; start by hand with `C:\xLandscape\run-beeview.cmd`).
-
-The script extracts the archives to `C:\xLandscape\xPollinator` and `C:\xLandscape\BeeView-server`,
-creates the venv and installs `requirements.txt` from PyPI (internet access needed once; behind a
-TLS-inspecting proxy set `PIP_CERT` to the CA bundle), opens the Windows firewall port, registers
-the scheduled task `BeeViewServer` (runs as SYSTEM at startup, restarts on failure) and waits until
-`http://localhost:<Port>/api/runs` answers. Logs are in `C:\xLandscape\logs\`.
-
-### Update
-
-Build new artefacts, copy them over, run `install.ps1` again. It stops the service, replaces the
-code, and keeps `xPollinator\run` (simulation results), `BeeView-server\data` (database and caches)
-and the venv. To replace the database as well, delete `C:\xLandscape\BeeView-server\data` before
-the run; `data.zip` is then extracted again.
-
-### Backup
-
-There is no snapshot mechanism on a plain server. Back up `C:\xLandscape\BeeView-server\data` and
-`C:\xLandscape\xPollinator\run` with the site's regular backup, with the service stopped
-(`Stop-ScheduledTask BeeViewServer`) when copying `beeview.duckdb`.
+See `deploy/windows/INSTALL.md`: `install.ps1` installs or updates; `-ReplaceData` swaps in the database
+of a newer package; single runs are imported with `import_run.py`.
 
 ## Windows Deployment (Portable / xcopy)
 

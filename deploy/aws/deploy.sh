@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy or update the BeeView stack (Windows EC2 + internal ALB) in the landscape-modelling account.
 #
-#   deploy/aws/deploy.sh package     # build xpollinator.zip, beeview-server.zip, data.zip in ../_deploy (no AWS needed;
+#   deploy/aws/deploy.sh package     # = deploy/package.sh: build the zips in ../_deploy/package (no AWS needed;
 #                                    # also the input for deploy/windows/install.ps1 on a plain Windows server)
 #   deploy/aws/deploy.sh upload      # package + upload artefacts to the deploy bucket
 #   deploy/aws/deploy.sh stack       # create/update the CloudFormation stack
@@ -32,33 +32,15 @@ latest_ami() {
 }
 
 package() {
-  mkdir -p "$WORK"
-  echo "packaging xPollinator"
-  tar -a -cf "$WORK/xpollinator.zip" -C "$ROOT" \
-    --exclude=xPollinator/run --exclude=xPollinator/.git --exclude=xPollinator/scripts/homologa \
-    --exclude=xPollinator/node_modules --exclude="*/__pycache__" --exclude=xPollinator/.claude \
-    --exclude="xPollinator/*.log" xPollinator
-  echo "packaging BeeView-server"
-  tar -a -cf "$WORK/beeview-server.zip" -C "$ROOT" \
-    --exclude=BeeView-server/venv --exclude=BeeView-server/data --exclude=BeeView-server/.git \
-    --exclude=BeeView-server/experiments --exclude=BeeView-server/BeeView-portable \
-    --exclude="*/__pycache__" --exclude="BeeView-server/*.log" --exclude="BeeView-server/*.png" \
-    --exclude=BeeView-server/nul --exclude=BeeView-server/.claude BeeView-server
-  echo "packaging data (stop the local BeeView server first: DuckDB holds an exclusive lock)"
-  rm -rf "$WORK/data" && mkdir -p "$WORK/data"
-  cp "$ROOT/BeeView-server/data/beeview.duckdb" "$WORK/data/" || { echo "beeview.duckdb is locked, stop the server and retry"; exit 1; }
-  cp "$ROOT/BeeView-server/data/arr.dat" "$ROOT/BeeView-server/data/"*.csv "$ROOT/BeeView-server/data/"*.json "$ROOT/BeeView-server/data/"Tarn_LULC_v04.* "$WORK/data/"
-  cp -r "$ROOT/BeeView-server/data/cache" "$WORK/data/"
-  tar -a -cf "$WORK/data.zip" -C "$WORK" data
-  cp "$HERE/../windows/install.ps1" "$WORK/"
-  ls -la "$WORK"/*.zip "$WORK/install.ps1"
+  # Builds from the committed state of all repositories; see deploy/package.sh.
+  DEPLOY_WORK="$WORK" bash "$HERE/../package.sh"
 }
 
 upload() {
   package
   # python-3.11-amd64.exe is optional here: bootstrap.ps1 downloads and signature-checks it on the instance when absent.
   for f in xpollinator.zip beeview-server.zip data.zip; do
-    aws s3 cp "$WORK/$f" "s3://$BUCKET/$PREFIX/$f" --only-show-errors
+    aws s3 cp "$WORK/package/$f" "s3://$BUCKET/$PREFIX/$f" --only-show-errors
   done
   aws s3 cp "$HERE/bootstrap.ps1" "s3://$BUCKET/$PREFIX/bootstrap.ps1" --only-show-errors
   aws s3 ls "s3://$BUCKET/$PREFIX/"
