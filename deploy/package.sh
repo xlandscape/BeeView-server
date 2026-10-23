@@ -15,7 +15,9 @@
 # Only committed content is packaged (git archive). Uncommitted changes are reported and left out.
 # Stop the local BeeView server first: DuckDB keeps the database file locked while it runs.
 # Requires: git, tar (Git for Windows), npm (BeeView build), BeeView-server/venv (DuckDB, pip).
-# Behind a TLS-inspecting proxy set PIP_CERT to a CA bundle for the wheel download.
+# Behind a TLS-inspecting proxy set PIP_CERT to a CA bundle for the wheel download. If pip gets
+# "407 authenticationrequired" from an authenticating proxy, run without it when direct access works:
+#   env -u HTTPS_PROXY -u HTTP_PROXY bash deploy/package.sh
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
