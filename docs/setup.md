@@ -126,7 +126,7 @@ files from `BeeView-server\data` to `C:\xLandscape\BeeView-server\data` on the t
 | File | Purpose |
 |---|---|
 | `beeview.duckdb` | the database |
-| `Tarn_LULC_v04.shp`, `.shx`, `.dbf`, `.prj`, `.cpg` | land-use map; the importer reads the coordinate system of new runs from the `.prj` |
+| `Tarn_LULC_v04.shp`, `.shx`, `.dbf`, `.prj`, `.cpg` | land-use map; the importer reads the coordinate system of new runs from the `.prj`. Identical to `xPollinator\scenario\Scenario-TarnEtGaronne\geo\Tarn_LULC_v04.*`, so it can be copied from there instead |
 | `arr.dat` | forage array of the scenario (only used when a database is rebuilt from files) |
 | `cache\landscape_*.pkl` | optional geometry cache; rebuilt automatically when missing |
 
