@@ -43,6 +43,14 @@ function Expand-Zip($zip, $dest) {
     if ($LASTEXITCODE -ne 0) { throw "extraction of $zip failed" }
 }
 
+# Put a folder kept across the update back in place. The archives can contain a folder of the same
+# name (xpollinator.zip has an empty run/, beeview-server.zip has data/ with two tracked files);
+# Move-Item onto an existing folder would nest the kept one inside it.
+function Restore-Kept($kept, $target) {
+    if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+    Move-Item $kept $target -Force
+}
+
 # ---------------------------------------------------------------- stop a running service
 $taskName = "BeeViewServer"
 if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
@@ -73,7 +81,7 @@ $xp = "$root\xPollinator"
 if (Test-Path "$xp\run") { Move-Item "$xp\run" "$root\xPollinator_run_keep" -Force }
 if (Test-Path $xp) { Remove-Item $xp -Recurse -Force }
 Expand-Zip "$staging\xpollinator.zip" $root
-if (Test-Path "$root\xPollinator_run_keep") { Move-Item "$root\xPollinator_run_keep" "$xp\run" -Force } else { New-Item -ItemType Directory -Force -Path "$xp\run" | Out-Null }
+if (Test-Path "$root\xPollinator_run_keep") { Restore-Kept "$root\xPollinator_run_keep" "$xp\run" } else { New-Item -ItemType Directory -Force -Path "$xp\run" | Out-Null }
 
 # BeeView-server: replace code, keep data/ and venv/
 $srv = "$root\BeeView-server"
@@ -83,11 +91,11 @@ if (Test-Path "$srv\venv") { Move-Item "$srv\venv" "$root\BeeView_venv_keep" -Fo
 if (Test-Path $srv) { Remove-Item $srv -Recurse -Force }
 Expand-Zip "$staging\beeview-server.zip" $root
 if ($keepData) {
-    Move-Item "$root\BeeView_data_keep" "$srv\data" -Force
+    Restore-Kept "$root\BeeView_data_keep" "$srv\data"
 } else {
     Expand-Zip "$staging\data.zip" $srv   # creates $srv\data
 }
-if (Test-Path "$root\BeeView_venv_keep") { Move-Item "$root\BeeView_venv_keep" "$srv\venv" -Force }
+if (Test-Path "$root\BeeView_venv_keep") { Restore-Kept "$root\BeeView_venv_keep" "$srv\venv" }
 
 # ---------------------------------------------------------------- virtual environment
 if (-not (Test-Path "$srv\venv\Scripts\python.exe")) {
