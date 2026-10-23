@@ -14,7 +14,8 @@
 #
 # Only committed content is packaged (git archive). Uncommitted changes are reported and left out.
 # Stop the local BeeView server first: DuckDB keeps the database file locked while it runs.
-# Requires: git, tar (Git for Windows), npm (BeeView build), BeeView-server/venv (DuckDB, pip).
+# Requires: git, tar (Git for Windows), npm (BeeView build), BeeView-server/venv (DuckDB),
+# the bundled Python 3.9 of xPollinator (wheel download).
 # Behind a TLS-inspecting proxy set PIP_CERT to a CA bundle for the wheel download. If pip gets
 # "407 authenticationrequired" from an authenticating proxy, run without it when direct access works:
 #   env -u HTTPS_PROXY -u HTTP_PROXY bash deploy/package.sh
@@ -110,9 +111,11 @@ find "$SRV/data/cache" -maxdepth 1 -type f ! -name "*.pre-*" -exec cp {} "$DATA/
 
 if [ "$WITH_WHEELS" = "1" ]; then
   echo "== wheels (cp39 / win_amd64) for an offline install"
-  if "$PY" -m pip download --quiet --dest "$STAGE/wheels" --only-binary=:all: \
-      --platform win_amd64 --python-version 3.9 --implementation cp --abi cp39 \
-      -r "$SRV/requirements.txt" pip; then
+  # Download with the Python 3.9 bundled in xPollinator: environment markers such as
+  # python_version < "3.11" (exceptiongroup, tomli, ...) are evaluated by the running interpreter.
+  PY39="$XP/model/core/bin/python-3.9.7-amd64/python.exe"
+  if "$PY39" -m pip download --quiet --isolated --disable-pip-version-check --dest "$STAGE/wheels" \
+      --only-binary=:all: ${PIP_CERT:+--cert "$PIP_CERT"} -r "$SRV/requirements.txt" pip; then
     (cd "$STAGE" && tar -a -cf "$OUT/wheels.zip" wheels)
   else
     echo "WARNING: wheel download failed; the package has no wheels.zip, so install.ps1 needs PyPI access"
