@@ -6,7 +6,7 @@ This is the backend server for the BeeView application, built with FastAPI.
 
 ### Prerequisites
 
-- Python 3.10 or higher (tested with 3.11)
+- Python 3.9 to 3.11 (tested with the Python 3.9.7 bundled in xPollinator and with 3.11)
 - pip (Python package installer)
 
 ### Installation
@@ -92,6 +92,8 @@ After import, the `data/` folder only needs:
 Applications data (`applications.txt`) is imported into DuckDB (`applications` table) by `import_all_experiments.py` and served from the database.
 
 ### Deployment Guides
+
+- Full system from the git repositories (branches, Java, Python, Node.js, database transfer): `docs/setup.md`
 
 Detailed platform-specific deployment docs are in MkDocs:
 
