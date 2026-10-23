@@ -108,10 +108,13 @@ find "$SRV/data/cache" -maxdepth 1 -type f ! -name "*.pre-*" -exec cp {} "$DATA/
 
 if [ "$WITH_WHEELS" = "1" ]; then
   echo "== wheels (cp39 / win_amd64) for an offline install"
-  "$PY" -m pip download --quiet --dest "$STAGE/wheels" --only-binary=:all: \
-    --platform win_amd64 --python-version 3.9 --implementation cp --abi cp39 \
-    -r "$SRV/requirements.txt" pip
-  (cd "$STAGE" && tar -a -cf "$OUT/wheels.zip" wheels)
+  if "$PY" -m pip download --quiet --dest "$STAGE/wheels" --only-binary=:all: \
+      --platform win_amd64 --python-version 3.9 --implementation cp --abi cp39 \
+      -r "$SRV/requirements.txt" pip; then
+    (cd "$STAGE" && tar -a -cf "$OUT/wheels.zip" wheels)
+  else
+    echo "WARNING: wheel download failed; the package has no wheels.zip, so install.ps1 needs PyPI access"
+  fi
 fi
 
 cp "$SRV/deploy/windows/install.ps1" "$SRV/deploy/windows/INSTALL.md" "$OUT/"
