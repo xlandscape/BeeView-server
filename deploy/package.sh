@@ -63,7 +63,7 @@ for entry in "${REPOS[@]}"; do
   [ "$changed" = "0" ] || echo "WARNING: $name has $changed uncommitted change(s); they are not packaged"
   [ "$unpushed" = "0" ] || echo "WARNING: $name has $unpushed unpushed commit(s) (or no upstream)"
 done
-if [ -n "$(git -C "$UI" status --short)" ]; then
+if [ -n "$(git -C "$UI" status --short --untracked-files=no)" ]; then
   echo "ERROR: BeeView has local changes; the frontend is built from the working tree, so commit or stash them first"
   exit 1
 fi
